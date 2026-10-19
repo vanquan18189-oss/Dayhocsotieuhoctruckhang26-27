@@ -1574,3 +1574,86 @@ export function shouldShowScoreColumn(grade: string, subject: string, assessment
   return false;
 }
 
+export interface YearResultInfo {
+  status: 'promoted' | 'not_eligible' | 'incomplete';
+  label: string;
+  reasons: string[];
+}
+
+export function computeYearResult(
+  st: any,
+  subjects: string[],
+  evalMap: Record<string, { dat?: string; score?: string | number }>,
+  grade: string,
+  semester: string
+): YearResultInfo {
+  if (!subjects || subjects.length === 0) {
+    return { status: 'incomplete', label: 'Chưa đủ dữ liệu', reasons: ['Chưa có danh sách môn học'] };
+  }
+
+  const reasons: string[] = [];
+  let hasIncomplete = false;
+  let hasViolation = false;
+
+  for (const subj of subjects) {
+    const evalData = evalMap ? evalMap[subj] : undefined;
+    const dat = evalData?.dat ? String(evalData.dat).trim().toUpperCase() : '';
+    const scoreRaw = evalData?.score !== undefined && evalData?.score !== null ? String(evalData.score).trim() : '';
+    const numScore = scoreRaw !== '' && scoreRaw !== '-' && !isNaN(Number(scoreRaw)) ? Number(scoreRaw) : null;
+
+    const needsScore = shouldShowScoreColumn(grade, subj, semester);
+
+    const hasDat = dat === 'T' || dat === 'H' || dat === 'CHT';
+    const hasValidScore = numScore !== null;
+
+    if (needsScore) {
+      if (!hasDat && !hasValidScore) {
+        hasIncomplete = true;
+        reasons.push(`${subj} (thiếu điểm và mức đạt)`);
+      } else {
+        if (dat === 'CHT') {
+          hasViolation = true;
+          reasons.push(`${subj} (mức CHT)`);
+        }
+        if (hasValidScore && numScore < 5) {
+          hasViolation = true;
+          reasons.push(`${subj} (điểm ${numScore} < 5)`);
+        }
+      }
+    } else {
+      if (!hasDat) {
+        hasIncomplete = true;
+        reasons.push(`${subj} (thiếu mức đạt)`);
+      } else {
+        if (dat === 'CHT') {
+          hasViolation = true;
+          reasons.push(`${subj} (mức CHT)`);
+        }
+      }
+    }
+  }
+
+  if (hasViolation) {
+    return {
+      status: 'not_eligible',
+      label: 'Chưa đủ điều kiện lên lớp',
+      reasons
+    };
+  }
+
+  if (hasIncomplete) {
+    return {
+      status: 'incomplete',
+      label: 'Chưa đủ dữ liệu',
+      reasons
+    };
+  }
+
+  return {
+    status: 'promoted',
+    label: 'Lên lớp',
+    reasons: []
+  };
+}
+
+

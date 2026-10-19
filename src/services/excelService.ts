@@ -1082,7 +1082,7 @@ interface SoTongKetExportItem {
   className: string;
   homeroomTeacher?: string;
   evaluations: Record<string, { dat: 'T' | 'H' | 'CHT'; score: string }>;
-  yearEndProposal?: { status: string; label?: string };
+  yearResult?: { status: string; label: string; reasons: string[] };
 }
 
 /**
@@ -1284,8 +1284,8 @@ export function exportSoTongKetToExcel(params: {
     });
 
     if (showYearResult) {
-      const proposal = st.yearEndProposal;
-      const statusText = proposal?.status === 'promoted' ? 'Lên lớp' : proposal?.status === 'review_needed' ? 'Cần xem xét' : proposal?.status === 'retained' ? 'Ở lại lớp' : '-';
+      const yr = st.yearResult;
+      const statusText = yr ? yr.label : '-';
       row.push(statusText);
     }
 

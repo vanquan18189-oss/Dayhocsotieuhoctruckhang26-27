@@ -76,7 +76,8 @@ import {
   formatScore,
   formatTotalScore,
   formatSubmissionDateTime,
-  shouldShowScoreColumn
+  shouldShowScoreColumn,
+  computeYearResult
 } from '../../services/hocBaDataService';
 import {
   getAllStudentsFromLocalStorage,
@@ -2985,44 +2986,10 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
     return sem.includes('cuối kì 2') || sem.includes('cuối kỳ 2') || sem.includes('cuoi_ki_2') || sem === 'cuối kì 2' || sem === 'cuối kỳ 2' || isCuoiKi2;
   }, [selectedSemester2, isCuoiKi2]);
 
-  const getStudentYearEndProposal = useCallback((st: any) => {
-    const sddcn = getStudentSddcn(st);
-    const saved = getYearEndResult(sddcn, selectedAcademicYear);
-
-    const evals = getStudentEvaluationsForSemester2(st, st._rawSt || st);
-    const classRes = calculateOverallClassification({
-      studentId: sddcn,
-      studentName: `${st.lastName} ${st.firstName}`.trim(),
-      className: st.className,
-      evaluations: evals
-    });
-
-    const autoClassification = classRes.classification;
-    let autoStatus: YearEndPromotionStatus = 'promoted';
-    if (autoClassification === 'Chưa hoàn thành') {
-      autoStatus = 'review_needed';
-    } else {
-      autoStatus = 'promoted';
-    }
-
-    if (saved) {
-      return {
-        status: saved.status,
-        note: saved.note || '',
-        isManualConfirmed: saved.isManualConfirmed ?? true,
-        autoRating: saved.autoRating || autoClassification,
-        autoStatus
-      };
-    }
-
-    return {
-      status: autoStatus,
-      note: '',
-      isManualConfirmed: false,
-      autoRating: autoClassification,
-      autoStatus
-    };
-  }, [selectedAcademicYear, getStudentSddcn, getStudentEvaluationsForSemester2]);
+  const getStudentYearResult = useCallback((st: any) => {
+    const evalMap = getStudentEvaluationsForSemester2(st, (st as any)._rawSt || st);
+    return computeYearResult(st, currentGradeSubjects2, evalMap, selectedGrade2, selectedSemester2);
+  }, [getStudentEvaluationsForSemester2, currentGradeSubjects2, selectedGrade2, selectedSemester2]);
 
   const handleOpenYearEndModal = useCallback((st: any, proposal: any) => {
     setSelectedYearEndStudent(st);
@@ -3061,7 +3028,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
         ...st,
         evaluations: getStudentEvaluationsForSemester2(st, (st as any)._rawSt || st),
         homeroomTeacher: getHomeroomTeacherName(st.className),
-        yearEndProposal: showYearResult ? getStudentYearEndProposal(st) : undefined
+        yearResult: showYearResult ? getStudentYearResult(st) : undefined
       })),
       grade: selectedGrade2,
       className: selectedClass2,
@@ -3071,7 +3038,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
       showYearResult
     });
     showToast(`✅ Đã xuất file Excel Sổ Tổng Kết cho ${selectedClass2 === 'Tất cả Lớp' ? selectedGrade2 : selectedClass2} thành công!`);
-  }, [filteredStudents2, getStudentEvaluationsForSemester2, getHomeroomTeacherName, selectedGrade2, selectedClass2, selectedSemester2, currentGradeSubjects2, homeroomTeacherName2, showYearResult, getStudentYearEndProposal]);
+  }, [filteredStudents2, getStudentEvaluationsForSemester2, getHomeroomTeacherName, selectedGrade2, selectedClass2, selectedSemester2, currentGradeSubjects2, homeroomTeacherName2, showYearResult, getStudentYearResult]);
 
   const handleViewDetail = useCallback((st: StudentRecord) => {
     setSelectedStudentDetail(st);
