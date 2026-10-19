@@ -223,13 +223,27 @@ export const UseQuestionBankModal: React.FC<UseQuestionBankModalProps> = ({
     return getLocalCachedQuestions();
   }, [questions]);
 
-  // Available classes for selected grade
-  const availableClasses = getClassesForGrade(grade).map(c => c.name);
+  // Lọc danh sách lớp học theo Khối lớp được chọn (Cơ chế Dependent Dropdown)
+  const availableClasses = useMemo(() => {
+    const classItems = getClassesForGrade(grade);
+    const names = Array.from(new Set(classItems.map((c) => c.name.trim()).filter(Boolean)));
+    names.sort((a, b) => a.localeCompare(b, 'vi', { numeric: true }));
+    return names;
+  }, [getClassesForGrade, grade]);
+
+  // Xử lý khi người dùng chọn Khối lớp khác: tự động đồng bộ và lọc lại danh sách lớp tham gia
+  const handleGradeChange = (newGrade: string) => {
+    setGrade(newGrade);
+    const validInNewGrade = getClassesForGrade(newGrade).map((c) => c.name.trim());
+    setSelectedClasses((prev) => prev.filter((cls) => validInNewGrade.includes(cls)));
+    setClassError(null);
+  };
 
   // Handle class toggle / addition
   const handleAddClass = (cls: string) => {
-    if (cls && !selectedClasses.includes(cls)) {
-      setSelectedClasses((prev) => [...prev, cls]);
+    const cleanCls = cls.trim();
+    if (cleanCls && !selectedClasses.includes(cleanCls)) {
+      setSelectedClasses((prev) => [...prev, cleanCls]);
       setClassError(null);
     }
   };
@@ -841,8 +855,8 @@ export const UseQuestionBankModal: React.FC<UseQuestionBankModalProps> = ({
                     </label>
                     <select
                       value={grade}
-                      onChange={(e) => setGrade(e.target.value)}
-                      className="w-full px-3.5 py-2.5 text-xs font-medium rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white cursor-pointer"
+                      onChange={(e) => handleGradeChange(e.target.value)}
+                      className="w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500 bg-white cursor-pointer text-slate-800 shadow-2xs"
                     >
                       {GRADES.map((g) => (
                         <option key={g} value={g}>
@@ -875,8 +889,8 @@ export const UseQuestionBankModal: React.FC<UseQuestionBankModalProps> = ({
 
                 {/* Chọn lớp giao bài tập (chỉ hiển thị khi !isLessonMode) */}
                 {!isLessonMode && (
-                  <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1.5 flex items-center justify-between">
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-slate-800 mb-1 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
                         <Users className="w-3.5 h-3.5 text-teal-600" />
                         <span>
@@ -885,63 +899,135 @@ export const UseQuestionBankModal: React.FC<UseQuestionBankModalProps> = ({
                             : isExamMode
                             ? 'Chọn lớp thi / giao đề kiểm tra'
                             : 'Chọn lớp giao bài tập'}{' '}
+                          <span className="text-teal-600 font-extrabold">({grade})</span>{' '}
                           <span className="text-rose-500">*</span>
                         </span>
                       </span>
-                      <span className="text-[10px] font-semibold text-slate-400">
-                        (Bắt buộc - Chọn ít nhất 1 lớp)
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {availableClasses.length > 0 && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedClasses([...availableClasses]);
+                                setClassError(null);
+                              }}
+                              className="text-[11px] font-bold text-teal-600 hover:text-teal-800 hover:underline cursor-pointer"
+                            >
+                              Chọn tất cả lớp {grade}
+                            </button>
+                            <span className="text-slate-300">•</span>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedClasses([])}
+                              className="text-[11px] font-bold text-slate-400 hover:text-slate-600 hover:underline cursor-pointer"
+                            >
+                              Bỏ chọn
+                            </button>
+                          </>
+                        )}
+                        <span className="text-[10px] font-semibold text-slate-400">
+                          (Bắt buộc - Chọn ít nhất 1 lớp)
+                        </span>
+                      </div>
                     </label>
+
+                    {/* Danh sách thả xuống lọc phụ thuộc (Dependent Dropdown) */}
                     <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                      <div className="sm:w-64 shrink-0">
+                      <div className="sm:w-72 shrink-0">
                         <select
-                          onChange={(e) => handleAddClass(e.target.value)}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleAddClass(e.target.value);
+                            }
+                          }}
                           value=""
-                          className={`w-full px-3.5 py-2.5 text-xs font-medium rounded-xl border ${
+                          className={`w-full px-3.5 py-2.5 text-xs font-bold rounded-xl border ${
                             classError
                               ? 'border-rose-400 focus:ring-2 focus:ring-rose-400'
                               : 'border-slate-300 focus:outline-none focus:ring-2 focus:ring-teal-500'
-                          } bg-white cursor-pointer`}
+                          } bg-white cursor-pointer text-slate-800`}
                         >
                           <option value="" disabled>
-                            Chọn thêm lớp...
+                            {availableClasses.length === 0
+                              ? `-- Chưa có lớp thuộc ${grade} trong CSDL --`
+                              : `-- Chọn lớp của ${grade} (${availableClasses.length} lớp) --`}
                           </option>
                           {availableClasses.map((c) => (
-                            <option key={c} value={c}>
-                              {c}
+                            <option key={c} value={c} disabled={selectedClasses.includes(c)}>
+                              {c} {selectedClasses.includes(c) ? '(Đã chọn)' : ''}
                             </option>
                           ))}
                         </select>
                       </div>
-                      {/* Selected Classes Chip list */}
-                      <div
-                        className={`flex flex-wrap gap-1.5 flex-1 items-center min-h-[38px] p-1.5 rounded-xl bg-slate-50 border ${
-                          classError
-                            ? 'border-rose-400 bg-rose-50/40 ring-1 ring-rose-300'
-                            : 'border-slate-200/70'
-                        }`}
-                      >
-                        {selectedClasses.length === 0 ? (
-                          <span className="text-xs text-slate-400 italic px-2">Chưa chọn lớp nào</span>
-                        ) : (
-                          selectedClasses.map((cls) => (
-                            <span
+
+                      {/* Các thẻ lớp trực quan để bấm chọn nhanh */}
+                      <div className="flex flex-wrap gap-1.5 flex-1 items-center">
+                        {availableClasses.map((cls) => {
+                          const isSelected = selectedClasses.includes(cls);
+                          return (
+                            <button
                               key={cls}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200"
+                              type="button"
+                              onClick={() => {
+                                if (isSelected) {
+                                  handleRemoveClass(cls);
+                                } else {
+                                  handleAddClass(cls);
+                                }
+                              }}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-teal-600 text-white shadow-xs scale-100 ring-2 ring-teal-300 ring-offset-1'
+                                  : 'bg-white text-slate-700 border border-slate-200 hover:bg-teal-50 hover:border-teal-300'
+                              }`}
                             >
+                              <span className={`w-3.5 h-3.5 rounded flex items-center justify-center text-[10px] ${
+                                isSelected ? 'bg-white/20 text-white' : 'border border-slate-300'
+                              }`}>
+                                {isSelected ? '✓' : ''}
+                              </span>
                               <span>{cls}</span>
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveClass(cls)}
-                                className="hover:bg-teal-200/60 rounded-full p-0.5 transition-colors cursor-pointer"
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </span>
-                          ))
-                        )}
+                            </button>
+                          );
+                        })}
                       </div>
                     </div>
+
+                    {/* Danh sách chip các lớp đã chọn */}
+                    <div
+                      className={`flex flex-wrap gap-1.5 items-center min-h-[38px] p-2 rounded-xl bg-slate-50 border ${
+                        classError
+                          ? 'border-rose-400 bg-rose-50/40 ring-1 ring-rose-300'
+                          : 'border-slate-200/70'
+                      }`}
+                    >
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+                        Lớp đã chọn ({selectedClasses.length}):
+                      </span>
+                      {selectedClasses.length === 0 ? (
+                        <span className="text-xs text-slate-400 italic">
+                          Chưa chọn lớp nào. Vui lòng bấm vào lớp phía trên hoặc chọn từ danh sách thả xuống.
+                        </span>
+                      ) : (
+                        selectedClasses.map((cls) => (
+                          <span
+                            key={cls}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-teal-50 text-teal-700 border border-teal-200 shadow-2xs"
+                          >
+                            <span>{cls}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveClass(cls)}
+                              className="hover:bg-teal-200/60 rounded-full p-0.5 transition-colors cursor-pointer text-teal-600 hover:text-teal-900"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
                     {classError && (
                       <p className="text-xs font-semibold text-rose-600 mt-1.5 flex items-center gap-1">
                         <AlertCircle className="w-3.5 h-3.5 shrink-0" />

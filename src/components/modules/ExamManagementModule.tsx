@@ -2579,9 +2579,17 @@ return (
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Lớp</label>
                 <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)} className="bg-transparent appearance-none pr-4 outline-none cursor-pointer">
 <option value="Tất cả các lớp">Tất cả các lớp</option>
-{(filterGrade === 'Tất cả các khối' ? ALL_CLASSES : CLASSES_BY_GRADE[filterGrade] || []).map((cls) => (
-            <option key={cls} value={cls}>{cls}</option>
-          ))}
+{(filterGrade === 'Tất cả các khối'
+  ? realClasses.map((c) => c.name)
+  : realClasses.filter((c) => {
+      const match = c.grade.match(/\d+/) || c.name.match(/\d+/);
+      const gradeNum = match ? match[0] : '';
+      const filterNum = filterGrade.match(/\d+/)?.[0] || '';
+      return gradeNum === filterNum;
+    }).map((c) => c.name)
+).map((cls) => (
+  <option key={cls} value={cls}>{cls}</option>
+))}
 </select>
               </div>
               <div>

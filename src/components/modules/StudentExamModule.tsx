@@ -25,7 +25,7 @@ import { StatsSummaryRow } from '../common/StatsSummaryRow';
 import { getSubjectColorStyles } from '../../utils/subjectColors';
 import { ExamPaper, QuestionItem } from '../../types';
 import { awardExamReward, awardAssignmentReward } from '../../config/rewardConfig';
-import { matchesQuestionType, isMultipleResponse, getCorrectOrderingSequence, normalizeMatchingPairs, shuffleOrdering } from '../../lib/constants';
+import { matchesQuestionType, normalizeQuestionType, isMultipleResponse, getCorrectOrderingSequence, normalizeMatchingPairs, shuffleOrdering } from '../../lib/constants';
 import { QuizLiveSidebar } from './QuizLiveSidebar';
 import {
   joinQuizLiveSession,
@@ -355,81 +355,136 @@ export const checkQuestionCorrectLocal = (qi: QuestionItem, choice: any): boolea
   }
 };
 
-export const isMatchingQuestion = (q: QuestionItem): boolean => {
+export const isMatchingQuestion = (q: any): boolean => {
   if (!q) return false;
   if (q.statements && Array.isArray(q.statements) && q.statements.length > 0) {
     return false;
   }
   const typeStr = (q.type || '').trim().toLowerCase();
-  if (matchesQuestionType(typeStr, 'matching') || 
-      typeStr === 'matching' || 
-      typeStr === 'noi_cap' || 
-      typeStr === 'ghep_noi' || 
-      typeStr === 'ghép nối' || 
-      typeStr === 'nối cặp' ||
-      typeStr === 'nối cặp / kéo thả' ||
-      typeStr === 'kéo thả'
+  const contentStr = (q.content || '').trim().toLowerCase();
+  if (
+    matchesQuestionType(typeStr, 'matching') || 
+    normalizeQuestionType(typeStr) === 'matching' ||
+    typeStr === 'matching' || 
+    typeStr === 'noi_cap' || 
+    typeStr === 'ghep_noi' || 
+    typeStr === 'ghép nối' || 
+    typeStr === 'nối cặp' || 
+    typeStr === 'nối cặp / kéo thả' || 
+    typeStr === 'kéo thả' ||
+    typeStr.includes('nối') ||
+    typeStr.includes('ghép') ||
+    typeStr.includes('noi_cap') ||
+    typeStr.includes('ghep_noi') ||
+    typeStr.includes('matching') ||
+    (Array.isArray(q.matchingPairs) && q.matchingPairs.length > 0) ||
+    contentStr.includes('ghép nối') ||
+    contentStr.includes('nối cặp') ||
+    contentStr.includes('nối tình huống') ||
+    contentStr.includes('nối cột')
   ) {
-    return true;
-  }
-  if (q.matchingPairs && Array.isArray(q.matchingPairs) && q.matchingPairs.length > 0) {
     return true;
   }
   return false;
 };
 
-const isEssayQuestion = (q: QuestionItem): boolean => {
+export const isEssayQuestion = (q: any): boolean => {
   if (!q) return false;
   const typeStr = (q.type || '').trim().toLowerCase();
+  const contentStr = (q.content || '').trim().toLowerCase();
   return matchesQuestionType(typeStr, 'essay') || 
+         normalizeQuestionType(typeStr) === 'essay' ||
          typeStr === 'essay' || 
          typeStr === 'tu_luan' || 
          typeStr === 'tự luận' || 
-         typeStr === 'tự luận tự do';
+         typeStr === 'tự luận tự do' ||
+         typeStr.includes('tự luận') ||
+         typeStr.includes('tu_luan') ||
+         typeStr.includes('essay');
 };
 
-const isTrueFalseQuestion = (q: QuestionItem): boolean => {
+export const isTrueFalseQuestion = (q: any): boolean => {
   if (!q) return false;
   const typeStr = (q.type || '').trim().toLowerCase();
+  const contentStr = (q.content || '').trim().toLowerCase();
   return matchesQuestionType(typeStr, 'true_false') || 
+         normalizeQuestionType(typeStr) === 'true_false' ||
          typeStr === 'true_false' || 
          typeStr === 'đúng/sai' || 
          typeStr === 'đúng / sai' || 
          typeStr === 'dung_sai' || 
-         (q.statements && Array.isArray(q.statements) && q.statements.length > 0);
+         typeStr.includes('đúng/sai') || 
+         typeStr.includes('đúng / sai') || 
+         typeStr.includes('dung_sai') || 
+         (Array.isArray(q.statements) && q.statements.length > 0) ||
+         contentStr.includes('đúng hoặc sai') ||
+         contentStr.includes('đúng hay sai');
 };
 
-const isMultipleResponseQuestion = (q: QuestionItem): boolean => {
+export const isMultipleResponseQuestion = (q: any): boolean => {
   if (!q) return false;
   const typeStr = (q.type || '').trim().toLowerCase();
+  const contentStr = (q.content || '').trim().toLowerCase();
   return matchesQuestionType(typeStr, 'multiple_response') || 
+         normalizeQuestionType(typeStr) === 'multiple_response' ||
          typeStr === 'multiple_response' || 
          typeStr === 'chọn nhiều đáp án' || 
          typeStr === 'nhiều đáp án' || 
          typeStr === 'chọn nhiều đáp án đúng' || 
          typeStr === 'multiple_choice_multi' || 
-         typeStr === 'multi_choice';
+         typeStr === 'multi_choice' ||
+         typeStr.includes('nhiều đáp án') ||
+         typeStr.includes('chọn nhiều') ||
+         typeStr.includes('multiple_response') ||
+         typeStr.includes('multi_choice') ||
+         contentStr.includes('chọn các đáp án đúng') ||
+         contentStr.includes('chọn nhiều đáp án');
 };
 
-const isFillBlankQuestion = (q: QuestionItem): boolean => {
+export const isFillBlankQuestion = (q: any): boolean => {
   if (!q) return false;
   const typeStr = (q.type || '').trim().toLowerCase();
+  const contentStr = (q.content || '').trim().toLowerCase();
   return matchesQuestionType(typeStr, 'fill_blank') || 
+         normalizeQuestionType(typeStr) === 'fill_blank' ||
          typeStr === 'fill_blank' || 
          typeStr === 'điền khuyết' || 
          typeStr === 'dien_khuyet' || 
          typeStr === 'điền khuyết / ngắn' || 
-         typeStr === 'short_answer';
+         typeStr === 'short_answer' || 
+         typeStr.includes('điền') ||
+         typeStr.includes('khuyết') ||
+         typeStr.includes('dien_khuyet') ||
+         typeStr.includes('fill') ||
+         typeStr.includes('blank') ||
+         contentStr.includes('điền từ') ||
+         contentStr.includes('điền vào chỗ trống') ||
+         contentStr.includes('điền khuyết');
 };
 
-export const isOrderingQuestion = (q: QuestionItem): boolean => {
+export const isOrderingQuestion = (q: any): boolean => {
   if (!q) return false;
   const typeStr = (q.type || '').trim().toLowerCase();
+  const contentStr = (q.content || '').trim().toLowerCase();
   return matchesQuestionType(typeStr, 'ordering') || 
+         normalizeQuestionType(typeStr) === 'ordering' ||
          typeStr === 'ordering' || 
          typeStr === 'sắp xếp' || 
          typeStr === 'sap_xep' || 
-         typeStr === 'sắp xếp thứ tự';
+         typeStr === 'sắp xếp thứ tự' || 
+         typeStr.includes('sắp xếp') ||
+         typeStr.includes('sap_xep') ||
+         typeStr.includes('thứ tự') ||
+         typeStr.includes('thu_tu') ||
+         typeStr.includes('order') ||
+         typeStr.includes('sequence') ||
+         (Array.isArray(q.correctOrder) && q.correctOrder.length > 0) ||
+         (Array.isArray(q.order) && q.order.length > 0) ||
+         (Array.isArray(q.indices) && q.indices.length > 0) ||
+         contentStr.includes('sắp xếp các bước') ||
+         contentStr.includes('sắp xếp theo thứ tự') ||
+         contentStr.includes('sắp xếp thứ tự') ||
+         contentStr.includes('sắp xếp');
 };
 
 export const resolveLatestQuestion = (q: QuestionItem): QuestionItem => {
@@ -440,67 +495,66 @@ export const getLatestCorrectOrder = (q: QuestionItem): string[] => {
   return getCorrectOrderingSequence(q);
 };
 
-const isClassificationQuestion = (q: QuestionItem): boolean => {
+export const isClassificationQuestion = (q: any): boolean => {
   if (!q) return false;
   const typeStr = (q.type || '').trim().toLowerCase();
+  const contentStr = (q.content || '').trim().toLowerCase();
   return matchesQuestionType(typeStr, 'classification') || 
+         normalizeQuestionType(typeStr) === 'classification' ||
          typeStr === 'classification' || 
          typeStr === 'phân loại' || 
-         typeStr === 'phan_loai';
+         typeStr === 'phan_loai' || 
+         typeStr.includes('phân loại') ||
+         typeStr.includes('phan_loai') ||
+         typeStr.includes('classification') ||
+         (Array.isArray(q.classificationItems) && q.classificationItems.length > 0) ||
+         contentStr.includes('phân loại');
 };
 
-export const isQuestionFullyAnswered = (q: any, ans: any): boolean => {
-  if (ans === undefined || ans === null) return false;
+/**
+ * Kiểm tra trạng thái đã làm / hoàn thành của câu hỏi (checkIsAnswered / isQuestionFullyAnswered).
+ * Nới lỏng điều kiện kiểm tra:
+ * - Dạng Sắp xếp (Ordering): Mặc định câu hỏi đã có cấu trúc danh sách các bước hiển thị sẵn trên màn hình,
+ *   học sinh xem hoặc thao tác -> Luôn tính là ĐÃ LÀM (true).
+ * - Dạng Nối cặp (Matching): Miễn là học sinh đã tương tác hoặc có dữ liệu ghép nối -> ĐÃ LÀM (true).
+ * - Dạng Điền khuyết / Tự luận (Fill blank / Essay): Học sinh đã nhập nội dung bất kỳ -> ĐÃ LÀM (true).
+ * - Dạng Đúng / Sai (True / False): Học sinh đã tương tác chọn Đúng/Sai -> ĐÃ LÀM (true).
+ * - Dạng Phân loại (Classification): Học sinh đã phân loại hoặc tương tác -> ĐÃ LÀM (true).
+ * - Dạng Trắc nghiệm: Học sinh đã chọn đáp án -> ĐÃ LÀM (true).
+ * - Miễn là câu hỏi đó đã được hiển thị, học sinh đã tương tác (hoặc đối với câu sắp xếp/trắc nghiệm
+ *   thì mặc định đã có cấu trúc dữ liệu hiển thị sẵn) thì phải được tính ngay là ĐÃ LÀM (true).
+ */
+export const checkIsAnswered = (q: any, ans: any): boolean => {
+  if (!q) return true;
 
-  // Matching (Ghép nối)
-  if (isMatchingQuestion(q)) {
-    if (typeof ans !== 'object' || ans === null) return false;
-    const pairs = q.matchingPairs || [];
-    if (pairs.length === 0) return Object.keys(ans).length > 0;
-    return pairs.every((_, pIdx) => ans[pIdx] !== undefined && ans[pIdx] !== null && String(ans[pIdx]).trim() !== '');
+  // 1. Dạng Sắp xếp thứ tự (Ordering):
+  // Mặc định luôn có cấu trúc các bước hiển thị sẵn cho học sinh, học sinh xem hoặc thao tác -> Luôn tính là ĐÃ LÀM.
+  if (isOrderingQuestion(q) || (ans && typeof ans === 'object' && ('order' in ans || Array.isArray(ans)))) {
+    return true;
   }
 
-  // Ordering (Sắp xếp thứ tự)
+  // 2. Nếu có câu trả lời bất kỳ trong ans
+  if (ans !== undefined && ans !== null) {
+    if (typeof ans === 'number') return true;
+    if (typeof ans === 'boolean') return true;
+    if (typeof ans === 'string') return ans.trim().length > 0;
+    if (Array.isArray(ans)) return ans.length > 0;
+    if (typeof ans === 'object') {
+      const vals = Object.values(ans).filter(v => v !== undefined && v !== null && String(v).trim() !== '');
+      if (vals.length > 0) return true;
+      if (Object.keys(ans).length > 0) return true;
+    }
+  }
+
+  // 3. Dự phòng cho câu sắp xếp
   if (isOrderingQuestion(q)) {
-    return Array.isArray(ans) && ans.length > 0 && ans.length === (q.options?.length || 0);
+    return true;
   }
 
-  // Classification (Phân loại nhóm)
-  if (isClassificationQuestion(q)) {
-    if (typeof ans !== 'object' || ans === null) return false;
-    const items = q.classificationItems || [];
-    if (items.length === 0) return Object.keys(ans).length > 0;
-    return items.every((_, iIdx) => ans[iIdx] !== undefined && ans[iIdx] !== null && String(ans[iIdx]).trim() !== '');
-  }
-
-  // True / False với danh sách nhận định statements
-  if (isTrueFalseQuestion(q) && q.statements && q.statements.length > 0) {
-    if (typeof ans !== 'object' || ans === null) return false;
-    return q.statements.every((_, sIdx) => ans[sIdx] !== undefined && ans[sIdx] !== null);
-  }
-
-  // True / False đơn giản
-  if (isTrueFalseQuestion(q)) {
-    return typeof ans === 'number' || typeof ans === 'boolean' || (typeof ans === 'string' && ans.trim() !== '');
-  }
-
-  // Multiple response (Chọn nhiều đáp án)
-  if (isMultipleResponseQuestion(q)) {
-    return Array.isArray(ans) && ans.length > 0;
-  }
-
-  // Trắc nghiệm đơn
-  if (q.options && q.options.length > 0) {
-    return typeof ans === 'number' || (typeof ans === 'string' && ans.trim() !== '');
-  }
-
-  // Tự luận / Điền khuyết
-  if (typeof ans === 'string') {
-    return ans.trim().length > 0;
-  }
-
-  return true;
+  return false;
 };
+
+export const isQuestionFullyAnswered = checkIsAnswered;
 
 const isMultipleChoiceQuestion = (q: QuestionItem): boolean => {
   if (!q) return false;
@@ -1477,11 +1531,21 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
     const startTime = Date.now();
     const duration = exam.durationMinutes || (isAssignment ? 45 : 15);
     
+    const initialAnswers: Record<number, any> = {};
+    (exam.questions || []).forEach((q, idx) => {
+      if (isOrderingQuestion(q)) {
+        const correctOrder = getCorrectOrderingSequence(q);
+        const rawOptions = q.options && q.options.length > 0 ? q.options : correctOrder;
+        const initialOrder = shuffleOrdering(rawOptions, correctOrder);
+        initialAnswers[idx] = { order: initialOrder, interacted: true };
+      }
+    });
+
     setActiveExamSession({
       exam,
       startTime,
       durationMinutes: duration,
-      answers: {},
+      answers: initialAnswers,
       bookmarked: {},
       currentQuestionIndex: 0
     });
@@ -1506,17 +1570,20 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
       }
     });
 
-    // 1. NẾU CÒN CÂU CHƯA LÀM: CHẶN TUYỆT ĐỐI VÀ CẢNH BÁO RÕ RÀNG
+    // 1. NẾU CÒN CÂU CHƯA LÀM: THÔNG BÁO VÀ CHO PHÉP HỌC SINH XÁC NHẬN NỘP BÀI (KHÔNG CHẶN CỨNG)
     if (unansweredList.length > 0) {
       setAlertModal({
         title: 'Chưa hoàn thành tất cả các câu hỏi',
-        message: `Bạn chưa hoàn thành tất cả các câu hỏi (còn ${unansweredList.length} câu chưa làm: Câu ${unansweredList.join(', ')}). Vui lòng hoàn thành tất cả các câu trước khi nộp bài!`,
-        type: 'unanswered_warning'
+        message: `Em còn ${unansweredList.length} câu chưa chọn đáp án (Câu ${unansweredList.join(', ')}). Em có chắc chắn muốn nộp bài ngay bây giờ không?`,
+        type: 'confirm_submit',
+        onConfirm: () => {
+          executeSubmitExam();
+        }
       });
       return;
     }
 
-    // 2. NẾU ĐÃ HOÀN THÀNH 100% TẤT CẢ CÁC CÂU: CHO PHÉP XÁC NHẬN NỘP BÀI
+    // 2. NẾU ĐÃ HOÀN THÀNH TẤT CẢ CÁC CÂU: CHO PHÉP XÁC NHẬN NỘP BÀI
     setAlertModal({
       title: isAssignment ? 'Xác nhận nộp bài tập' : 'Xác nhận nộp bài kiểm tra',
       message: `Em đã hoàn thành đầy đủ ${questions.length}/${questions.length} câu hỏi. Em có chắc chắn muốn nộp bài để xem kết quả không?`,
@@ -2342,7 +2409,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                                     if (prev.answers[idx]) return prev;
                                     return {
                                       ...prev,
-                                      answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: false } }
+                                      answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: true } }
                                     };
                                   });
                                 }, 0);
@@ -2358,7 +2425,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                                       if (!prev) return null;
                                       return {
                                         ...prev,
-                                        answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: false } }
+                                        answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: true } }
                                       };
                                     });
                                   }, 0);
@@ -2378,7 +2445,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                                       if (!prev) return null;
                                       return {
                                         ...prev,
-                                        answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: false } }
+                                        answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: true } }
                                       };
                                     });
                                   }, 0);
@@ -2731,6 +2798,27 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                               </button>
                             </div>
                           )
+                        ) : isFillBlankQuestion(q) ? (
+                          <div className="space-y-3">
+                            <div className="bg-amber-50 border border-amber-200 p-3.5 rounded-2xl text-amber-950 text-xs sm:text-sm font-semibold flex items-center gap-2">
+                              <span>✏️</span>
+                              <span>Điền từ hoặc câu trả lời thích hợp vào ô bên dưới:</span>
+                            </div>
+                            <input
+                              type="text"
+                              value={activeExamSession.answers[idx] !== undefined ? activeExamSession.answers[idx] : ''}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setActiveExamSession(prev => {
+                                  if (!prev) return null;
+                                  const answers = { ...prev.answers, [idx]: val };
+                                  return { ...prev, answers, currentQuestionIndex: idx };
+                                });
+                              }}
+                              placeholder="Nhập câu trả lời của em tại đây..."
+                              className="w-full border-2 border-slate-200 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 rounded-2xl px-4 py-3.5 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none transition-all shadow-xs"
+                            />
+                          </div>
                         ) : (
                           <div className="space-y-3">
                             <textarea
@@ -2838,12 +2926,26 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                     </button>
                   </>
                 ) : alertModal.type === 'unanswered_warning' ? (
-                  <button
-                    onClick={() => setAlertModal(null)}
-                    className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs transition-all shadow-md cursor-pointer"
-                  >
-                    Đã hiểu, quay lại làm tiếp
-                  </button>
+                  <div className="flex items-center justify-end gap-3 w-full">
+                    <button
+                      onClick={() => setAlertModal(null)}
+                      className="flex-1 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold text-xs hover:bg-slate-100 transition-all cursor-pointer"
+                    >
+                      Quay lại làm tiếp
+                    </button>
+                    {alertModal.onConfirm && (
+                      <button
+                        onClick={() => {
+                          const cb = alertModal.onConfirm;
+                          setAlertModal(null);
+                          if (cb) cb();
+                        }}
+                        className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition-all shadow-md cursor-pointer"
+                      >
+                        Xác nhận nộp bài
+                      </button>
+                    )}
+                  </div>
                 ) : alertModal.type === 'timeout' || alertModal.type === 'submitted_success' ? (
                   <button
                     onClick={() => {
@@ -3350,12 +3452,26 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                   </button>
                 </>
               ) : alertModal.type === 'unanswered_warning' ? (
-                <button
-                  onClick={() => setAlertModal(null)}
-                  className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs transition-all shadow-md cursor-pointer"
-                >
-                  Đã hiểu, quay lại làm tiếp
-                </button>
+                <div className="flex items-center justify-end gap-3 w-full">
+                  <button
+                    onClick={() => setAlertModal(null)}
+                    className="flex-1 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold text-xs hover:bg-slate-100 transition-all cursor-pointer"
+                  >
+                    Quay lại làm tiếp
+                  </button>
+                  {alertModal.onConfirm && (
+                    <button
+                      onClick={() => {
+                        const cb = alertModal.onConfirm;
+                        setAlertModal(null);
+                        if (cb) cb();
+                      }}
+                      className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs transition-all shadow-md cursor-pointer"
+                    >
+                      Xác nhận nộp bài
+                    </button>
+                  )}
+                </div>
               ) : alertModal.type === 'timeout' || alertModal.type === 'submitted_success' ? (
                 <button
                   onClick={() => {

@@ -327,6 +327,31 @@ export const QuizziGameModal: React.FC<QuizziGameModalProps> = ({
               )}
             </div>
 
+            {/* Dropdown chọn lớp phụ thuộc khối (Dependent Dropdown) */}
+            <div className="relative">
+              <select
+                value=""
+                onChange={(e) => {
+                  if (e.target.value) {
+                    handleToggleClass(e.target.value);
+                  }
+                }}
+                className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-700 appearance-none outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 cursor-pointer"
+              >
+                <option value="" disabled>
+                  {availableClasses.length === 0
+                    ? `-- Chưa có lớp thuộc ${selectedGrade} trong CSDL --`
+                    : `-- Chọn lớp thuộc ${selectedGrade} (${availableClasses.length} lớp) --`}
+                </option>
+                {availableClasses.map((cls) => (
+                  <option key={cls} value={cls} disabled={selectedClasses.includes(cls)}>
+                    {cls} {selectedClasses.includes(cls) ? '(Đã chọn)' : ''}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+
             {/* Danh sách thẻ Tags Multi-select */}
             <div className="flex flex-wrap gap-2 pt-1">
               {availableClasses.map((cls) => {

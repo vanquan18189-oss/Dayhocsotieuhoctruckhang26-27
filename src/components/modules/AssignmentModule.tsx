@@ -1289,7 +1289,10 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
               className="w-full pl-9 pr-8 py-2.5 text-xs font-bold rounded-xl border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none cursor-pointer"
             >
               <option value="Tất cả các lớp">Tất cả các lớp</option>
-              {(selectedGrade === 'Tất cả các khối' ? ALL_CLASSES : CLASSES_BY_GRADE[selectedGrade] || []).map((cls) => (
+              {(selectedGrade === 'Tất cả các khối'
+                ? allRealClasses.map((c) => c.name)
+                : fetchClassesForGrade(selectedGrade).map((c) => c.name)
+              ).map((cls) => (
                 <option key={cls} value={cls}>{cls}</option>
               ))}
             </select>

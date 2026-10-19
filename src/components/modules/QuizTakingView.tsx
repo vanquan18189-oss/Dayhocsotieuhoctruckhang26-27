@@ -333,12 +333,21 @@ export const QuizTakingView: React.FC<QuizTakingViewProps> = ({
               </p>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 flex items-center justify-end gap-3">
               <button
                 onClick={() => setShowConfirmModal(false)}
-                className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-md shadow-amber-500/20 cursor-pointer transition-all"
+                className="flex-1 py-3 rounded-xl border border-slate-200 bg-white text-slate-700 font-bold text-xs hover:bg-slate-50 cursor-pointer transition-all"
               >
-                Đã hiểu, quay lại làm tiếp
+                Tiếp tục làm bài
+              </button>
+              <button
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  handleFinalSubmit();
+                }}
+                className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md shadow-emerald-600/20 cursor-pointer transition-all"
+              >
+                Xác nhận nộp bài
               </button>
             </div>
           </div>
