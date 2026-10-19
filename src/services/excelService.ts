@@ -1082,6 +1082,7 @@ interface SoTongKetExportItem {
   className: string;
   homeroomTeacher?: string;
   evaluations: Record<string, { dat: 'T' | 'H' | 'CHT'; score: string }>;
+  yearEndProposal?: { status: string; label?: string };
 }
 
 /**
@@ -1198,8 +1199,9 @@ export function exportSoTongKetToExcel(params: {
   semester: string;
   subjects: string[];
   homeroomTeacher?: string;
+  showYearResult?: boolean;
 }) {
-  const { students, grade, className, semester, subjects, homeroomTeacher } = params;
+  const { students, grade, className, semester, subjects, homeroomTeacher, showYearResult } = params;
   const isAllClasses = className === 'Tất cả Lớp';
   const wb = XLSX.utils.book_new();
 
@@ -1242,6 +1244,10 @@ export function exportSoTongKetToExcel(params: {
     }
   });
 
+  if (showYearResult) {
+    headers.push('Kết quả cuối năm');
+  }
+
   const sheetData: any[][] = [
     titleRow1,
     titleRow2,
@@ -1277,6 +1283,12 @@ export function exportSoTongKetToExcel(params: {
       }
     });
 
+    if (showYearResult) {
+      const proposal = st.yearEndProposal;
+      const statusText = proposal?.status === 'promoted' ? 'Lên lớp' : proposal?.status === 'review_needed' ? 'Cần xem xét' : proposal?.status === 'retained' ? 'Ở lại lớp' : '-';
+      row.push(statusText);
+    }
+
     sheetData.push(row);
   });
 
@@ -1290,6 +1302,9 @@ export function exportSoTongKetToExcel(params: {
       colWidths.push(10);
     }
   });
+  if (showYearResult) {
+    colWidths.push(18);
+  }
   setWorksheetColWidths(ws, colWidths);
 
   XLSX.utils.book_append_sheet(wb, ws, 'SoTongKet');

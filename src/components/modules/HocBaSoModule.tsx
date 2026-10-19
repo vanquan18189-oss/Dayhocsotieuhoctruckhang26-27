@@ -2980,6 +2980,11 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
     return sem.includes('cuối k') && sem.includes('2');
   }, [selectedSemester2]);
 
+  const showYearResult = useMemo(() => {
+    const sem = (selectedSemester2 || '').toLowerCase();
+    return sem.includes('cuối kì 2') || sem.includes('cuối kỳ 2') || sem.includes('cuoi_ki_2') || sem === 'cuối kì 2' || sem === 'cuối kỳ 2' || isCuoiKi2;
+  }, [selectedSemester2, isCuoiKi2]);
+
   const getStudentYearEndProposal = useCallback((st: any) => {
     const sddcn = getStudentSddcn(st);
     const saved = getYearEndResult(sddcn, selectedAcademicYear);
@@ -3055,16 +3060,18 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
       students: filteredStudents2.map(st => ({
         ...st,
         evaluations: getStudentEvaluationsForSemester2(st, (st as any)._rawSt || st),
-        homeroomTeacher: getHomeroomTeacherName(st.className)
+        homeroomTeacher: getHomeroomTeacherName(st.className),
+        yearEndProposal: showYearResult ? getStudentYearEndProposal(st) : undefined
       })),
       grade: selectedGrade2,
       className: selectedClass2,
       semester: selectedSemester2,
       subjects: currentGradeSubjects2,
-      homeroomTeacher: homeroomTeacherName2
+      homeroomTeacher: homeroomTeacherName2,
+      showYearResult
     });
     showToast(`✅ Đã xuất file Excel Sổ Tổng Kết cho ${selectedClass2 === 'Tất cả Lớp' ? selectedGrade2 : selectedClass2} thành công!`);
-  }, [filteredStudents2, getStudentEvaluationsForSemester2, getHomeroomTeacherName, selectedGrade2, selectedClass2, selectedSemester2, currentGradeSubjects2, homeroomTeacherName2]);
+  }, [filteredStudents2, getStudentEvaluationsForSemester2, getHomeroomTeacherName, selectedGrade2, selectedClass2, selectedSemester2, currentGradeSubjects2, homeroomTeacherName2, showYearResult, getStudentYearEndProposal]);
 
   const handleViewDetail = useCallback((st: StudentRecord) => {
     setSelectedStudentDetail(st);
@@ -3302,9 +3309,9 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-100 text-slate-700 font-extrabold border-b border-slate-200 text-center">
-                    <th className="p-3 border-r border-slate-200 w-12">STT</th>
-                    <th className="p-3 border-r border-slate-200 min-w-[150px]">Họ và tên</th>
-                    <th className="p-3 border-r border-slate-200 min-w-[100px]">Ngày sinh</th>
+                    <th className="p-3 border-r border-slate-200 w-12 sticky left-0 bg-slate-100 z-30 shadow-2xs">STT</th>
+                    <th className="p-3 border-r border-slate-200 min-w-[150px] sticky left-[48px] bg-slate-100 z-30 shadow-2xs">Họ và tên</th>
+                    <th className="p-3 border-r border-slate-200 min-w-[100px] sticky left-[198px] bg-slate-100 z-30 shadow-2xs">Ngày sinh</th>
                     <th className="p-3 border-r border-slate-200 text-left min-w-[380px]">Lời nhận xét</th>
                     <th className="p-3 border-r border-slate-200 w-16">Đạt</th>
                     {shouldShowScoreColumn(selectedGrade1, selectedSubject1, selectedExamType1) && (
@@ -3332,9 +3339,9 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                       const displayScore = comment?.score !== undefined ? comment.score : (studentEval?.score || '');
 
                       return (
-                        <tr key={st.id} className="hover:bg-slate-50/80 transition-colors">
-                          <td className="p-3 text-center border-r border-slate-200 font-semibold text-slate-600">{idx + 1}</td>
-                          <td className="p-3 border-r border-slate-200 font-bold text-slate-900">
+                        <tr key={st.id} className="hover:bg-slate-50/80 transition-colors group">
+                          <td className="p-3 text-center border-r border-slate-200 font-semibold text-slate-600 sticky left-0 bg-white group-hover:bg-slate-50 z-20 shadow-2xs">{idx + 1}</td>
+                          <td className="p-3 border-r border-slate-200 font-bold text-slate-900 sticky left-[48px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span>{st.lastName} {st.firstName}</span>
                               {st.isFemale && <span className="text-[10px] px-1.5 py-0.5 rounded bg-pink-50 text-pink-600 font-normal">Nữ</span>}
@@ -3348,7 +3355,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                               </div>
                             )}
                           </td>
-                          <td className="p-3 text-center border-r border-slate-200 text-slate-600 font-mono text-[11px]">{st.dob}</td>
+                          <td className="p-3 text-center border-r border-slate-200 text-slate-600 font-mono text-[11px] sticky left-[198px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">{st.dob}</td>
                           <td className="p-3.5 border-r border-slate-200 text-slate-700 leading-relaxed">
                             {hasComment && comment ? (
                               <div className="space-y-1">
@@ -3526,17 +3533,22 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-100 text-slate-700 font-extrabold border-b border-slate-200 text-center">
-                    <th className="p-3 border-r border-slate-200 w-12" rowSpan={2}>STT</th>
-                    <th className="p-3 border-r border-slate-200 min-w-[110px]" rowSpan={2}>Họ lót</th>
-                    <th className="p-3 border-r border-slate-200 min-w-[90px]" rowSpan={2}>Tên</th>
-                    {selectedClass2 === 'Tất cả Lớp' && (
+                    <th className="p-3 border-r border-slate-200 w-12 sticky left-0 bg-slate-100 z-30 shadow-2xs" rowSpan={2}>STT</th>
+                    <th className="p-3 border-r border-slate-200 min-w-[110px] sticky left-[48px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>Họ lót</th>
+                    <th className="p-3 border-r border-slate-200 min-w-[90px] sticky left-[158px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>Tên</th>
+                    {selectedClass2 === 'Tất cả Lớp' ? (
                       <>
-                        <th className="p-3 border-r border-slate-200 min-w-[75px]" rowSpan={2}>Lớp</th>
-                        <th className="p-3 border-r border-slate-200 min-w-[150px]" rowSpan={2}>GVCN</th>
+                        <th className="p-3 border-r border-slate-200 min-w-[75px] sticky left-[248px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>Lớp</th>
+                        <th className="p-3 border-r border-slate-200 min-w-[150px] sticky left-[323px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>GVCN</th>
+                        <th className="p-3 border-r border-slate-200 min-w-[90px] sticky left-[473px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>Ngày sinh</th>
+                        <th className="p-3 border-r border-slate-200 w-14 sticky left-[563px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>Nữ</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="p-3 border-r border-slate-200 min-w-[90px] sticky left-[248px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>Ngày sinh</th>
+                        <th className="p-3 border-r border-slate-200 w-14 sticky left-[338px] bg-slate-100 z-30 shadow-2xs" rowSpan={2}>Nữ</th>
                       </>
                     )}
-                    <th className="p-3 border-r border-slate-200 min-w-[90px]" rowSpan={2}>Ngày sinh</th>
-                    <th className="p-3 border-r border-slate-200 w-14" rowSpan={2}>Nữ</th>
                     {currentGradeSubjects2.map((subj) => {
                       const showScore = shouldShowScoreColumn(selectedGrade2, subj, selectedSemester2);
                       return (
@@ -3549,12 +3561,14 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                         </th>
                       );
                     })}
-                    <th
-                      className="p-3 border-l border-slate-300 min-w-[170px] sticky right-0 bg-slate-100 z-10 shadow-xs text-center font-extrabold text-slate-800"
-                      rowSpan={2}
-                    >
-                      KẾT QUẢ CUỐI NĂM
-                    </th>
+                    {showYearResult && (
+                      <th
+                        className="p-3 border-l border-slate-300 min-w-[170px] sticky right-0 bg-slate-100 z-10 shadow-xs text-center font-extrabold text-slate-800"
+                        rowSpan={2}
+                      >
+                        KẾT QUẢ CUỐI NĂM
+                      </th>
+                    )}
                   </tr>
                   <tr className="bg-slate-50 text-slate-600 text-[11px] font-bold border-b border-slate-200 text-center">
                     {currentGradeSubjects2.map((subj) => {
@@ -3574,7 +3588,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                   {filteredStudents2.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={(selectedClass2 === 'Tất cả Lớp' ? 7 : 5) + currentGradeSubjects2.reduce((acc, subj) => acc + (shouldShowScoreColumn(selectedGrade2, subj, selectedSemester2) ? 2 : 1), 0) + 1}
+                        colSpan={(selectedClass2 === 'Tất cả Lớp' ? 7 : 5) + currentGradeSubjects2.reduce((acc, subj) => acc + (shouldShowScoreColumn(selectedGrade2, subj, selectedSemester2) ? 2 : 1), 0) + (showYearResult ? 1 : 0)}
                         className="text-center py-12 text-slate-400 text-xs"
                       >
                         <div className="flex flex-col items-center justify-center space-y-2">
@@ -3586,23 +3600,30 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                   ) : (
                     filteredStudents2.map((st, idx) => (
                       <tr key={st.id} className="hover:bg-slate-50/80 transition-colors group">
-                        <td className="p-3 text-center border-r border-slate-200 font-semibold text-slate-600">{idx + 1}</td>
-                        <td className="p-3 border-r border-slate-200 font-bold text-slate-800">{st.lastName}</td>
-                        <td className="p-3 border-r border-slate-200 font-extrabold text-teal-800">{st.firstName}</td>
-                        {selectedClass2 === 'Tất cả Lớp' && (
+                        <td className="p-3 text-center border-r border-slate-200 font-semibold text-slate-600 sticky left-0 bg-white group-hover:bg-slate-50 z-20 shadow-2xs">{idx + 1}</td>
+                        <td className="p-3 border-r border-slate-200 font-bold text-slate-800 sticky left-[48px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">{st.lastName}</td>
+                        <td className="p-3 border-r border-slate-200 font-extrabold text-teal-800 sticky left-[158px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">{st.firstName}</td>
+                        {selectedClass2 === 'Tất cả Lớp' ? (
                           <>
-                            <td className="p-3 text-center border-r border-slate-200 font-bold text-teal-700">
+                            <td className="p-3 text-center border-r border-slate-200 font-bold text-teal-700 sticky left-[248px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">
                               <span className="px-2 py-0.5 rounded-md bg-teal-50 border border-teal-100 font-bold">{st.className || selectedGrade2}</span>
                             </td>
-                            <td className="p-3 border-r border-slate-200 font-medium text-slate-700 whitespace-nowrap">
+                            <td className="p-3 border-r border-slate-200 font-medium text-slate-700 whitespace-nowrap sticky left-[323px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">
                               {getHomeroomTeacherName(st.className) || '-'}
+                            </td>
+                            <td className="p-3 text-center border-r border-slate-200 text-slate-600 font-mono text-[11px] sticky left-[473px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">{st.dob}</td>
+                            <td className="p-3 text-center border-r border-slate-200 sticky left-[563px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">
+                              <input type="checkbox" checked={st.isFemale} readOnly className="rounded text-teal-600 focus:ring-teal-500 cursor-pointer" />
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="p-3 text-center border-r border-slate-200 text-slate-600 font-mono text-[11px] sticky left-[248px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">{st.dob}</td>
+                            <td className="p-3 text-center border-r border-slate-200 sticky left-[338px] bg-white group-hover:bg-slate-50 z-20 shadow-2xs">
+                              <input type="checkbox" checked={st.isFemale} readOnly className="rounded text-teal-600 focus:ring-teal-500 cursor-pointer" />
                             </td>
                           </>
                         )}
-                        <td className="p-3 text-center border-r border-slate-200 text-slate-600 font-mono text-[11px]">{st.dob}</td>
-                        <td className="p-3 text-center border-r border-slate-200">
-                          <input type="checkbox" checked={st.isFemale} readOnly className="rounded text-teal-600 focus:ring-teal-500 cursor-pointer" />
-                        </td>
                         {(() => {
                           const evalMap = getStudentEvaluationsForSemester2(st, (st as any)._rawSt || st);
                           return currentGradeSubjects2.map((subj) => {
@@ -3637,50 +3658,48 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                         })()}
 
                         {/* Sticky Column: KẾT QUẢ CUỐI NĂM */}
-                        <td className="p-2 border-l border-slate-300 sticky right-0 bg-white group-hover:bg-slate-50 transition-colors z-10 text-center shadow-2xs">
-                          {isCuoiKi2 ? (() => {
-                            const proposal = getStudentYearEndProposal(st);
-                            return (
-                              <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                {proposal.status === 'promoted' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                    Lên lớp
-                                  </span>
-                                )}
-                                {proposal.status === 'review_needed' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
-                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                    Cần xem xét
-                                  </span>
-                                )}
-                                {proposal.status === 'retained' && (
-                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs">
-                                    🛑 Ở lại lớp
-                                  </span>
-                                )}
+                        {showYearResult && (
+                          <td className="p-2 border-l border-slate-300 sticky right-0 bg-white group-hover:bg-slate-50 transition-colors z-10 text-center shadow-2xs">
+                            {(() => {
+                              const proposal = getStudentYearEndProposal(st);
+                              return (
+                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                  {proposal.status === 'promoted' && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                      Lên lớp
+                                    </span>
+                                  )}
+                                  {proposal.status === 'review_needed' && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                      Cần xem xét
+                                    </span>
+                                  )}
+                                  {proposal.status === 'retained' && (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs">
+                                      🛑 Ở lại lớp
+                                    </span>
+                                  )}
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenYearEndModal(st, proposal)}
-                                  className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 border ${
-                                    proposal.isManualConfirmed
-                                      ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                                      : 'bg-teal-600 hover:bg-teal-700 text-white border-teal-600 shadow-2xs'
-                                  }`}
-                                  title={proposal.isManualConfirmed ? "Sửa xác nhận kết quả" : "Thao tác xác nhận trạng thái cuối năm"}
-                                >
-                                  {proposal.isManualConfirmed ? <Edit3 className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
-                                  <span>{proposal.isManualConfirmed ? 'Đã duyệt' : 'Xác nhận'}</span>
-                                </button>
-                              </div>
-                            );
-                          })() : (
-                            <span className="text-slate-400 font-medium text-[11px] block" title="Chỉ xét cuối năm học">
-                              - <span className="text-[10px] text-slate-300 hidden sm:inline">(Chỉ xét cuối năm)</span>
-                            </span>
-                          )}
-                        </td>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenYearEndModal(st, proposal)}
+                                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 border ${
+                                      proposal.isManualConfirmed
+                                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
+                                        : 'bg-teal-600 hover:bg-teal-700 text-white border-teal-600 shadow-2xs'
+                                    }`}
+                                    title={proposal.isManualConfirmed ? "Sửa xác nhận kết quả" : "Thao tác xác nhận trạng thái cuối năm"}
+                                  >
+                                    {proposal.isManualConfirmed ? <Edit3 className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
+                                    <span>{proposal.isManualConfirmed ? 'Đã duyệt' : 'Xác nhận'}</span>
+                                  </button>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                        )}
                       </tr>
                     ))
                   )}
