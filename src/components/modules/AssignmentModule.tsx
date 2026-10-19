@@ -50,7 +50,7 @@ import {
   ArrowUpDown,
   GripVertical
 } from 'lucide-react';
-import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, QUESTION_TYPES, normalizeQuestionType, getDefaultAnswerSchemaByType, sanitizeQuestionForFirestore, getQuestionTypeLabel, isGradeMatching, extractGradeDigit } from '../../lib/constants';
+import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, QUESTION_TYPES, normalizeQuestionType, getDefaultAnswerSchemaByType, sanitizeQuestionForFirestore, getQuestionTypeLabel, isGradeMatching, extractGradeDigit, sanitizeOrNormalizeQuestion, isMatchingQuestion } from '../../lib/constants';
 import { useClassesList } from '../../services/classStorageService';
 import { HomeworkAssignment, AssignmentSubmission, UserRole, QuestionItem } from '../../types';
 import { gradeSubmissionAI } from '../../services/geminiService';
@@ -756,7 +756,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
         targetClass: cls,
         dueDate: config.dueDate || '2026-09-10T23:59',
         description: `Bài tập tự luyện từ Ngân hàng câu hỏi gồm ${config.selectedQuestions.length} câu hỏi chuẩn sư phạm.`,
-        questions: config.selectedQuestions,
+        questions: config.selectedQuestions.map(q => sanitizeOrNormalizeQuestion(q)),
         teacherId: activeTeacherProfile.id,
         teacherName: activeTeacherProfile.name,
         teacherEmail: activeTeacherProfile.email,
@@ -780,7 +780,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
   };
 
   const handleSelectQuestionsForForm = (selected: QuestionItem[]) => {
-    setFormQuestions(prev => [...prev, ...selected]);
+    setFormQuestions(prev => [...prev, ...selected.map(q => sanitizeOrNormalizeQuestion(q))]);
     showToast(`✅ Đã thêm ${selected.length} câu hỏi từ Ngân hàng vào danh sách!`);
     setIsBankSelectModalOpen(false);
   };
@@ -965,7 +965,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     setFormTeacherName(as.teacherName || effectiveTeacherName);
     setFormDueDate(as.dueDate);
     setFormDescription(as.description);
-    setFormQuestions(as.questions || []);
+    setFormQuestions((as.questions || []).map(q => sanitizeOrNormalizeQuestion(q)));
     setIsCreatingModalOpen(true);
     setOpenActionMenuId(null);
   };
@@ -1578,8 +1578,8 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
       {/* ========================================== */}
       {isCreatingModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-4xl w-full p-6 sm:p-8 shadow-2xl border border-slate-200 space-y-6 animate-scale-up max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          <div className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden animate-scale-up">
+            <div className="flex items-center justify-between px-6 py-4 sm:px-8 sm:py-5 border-b border-slate-100 shrink-0 bg-white">
               <h3 className="text-lg font-extrabold text-slate-900 font-heading flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
                   <Sparkles className="w-5 h-5" />
@@ -1597,6 +1597,9 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* Scrollable Content */}
+            <div className="flex-1 min-h-0 overflow-y-auto p-6 sm:p-8 space-y-6 pb-28">
 
             {/* Tiêu đề bài tập */}
             <div>
@@ -2452,16 +2455,19 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
               onSelectQuestions={handleSelectQuestionsForForm}
             />
 
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 bg-white">
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-white shrink-0 rounded-b-3xl">
               <button
                 onClick={() => setIsCreatingModalOpen(false)}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors"
+                className="px-5 py-2.5 rounded-xl text-xs sm:text-sm font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer transition-colors"
               >
                 Hủy bỏ
               </button>
               <button
                 onClick={handleSaveForm}
-                className="px-6 py-2.5 rounded-xl text-xs font-black bg-indigo-900 hover:bg-indigo-950 text-white shadow-lg cursor-pointer transition-all flex items-center gap-2"
+                className="px-6 py-2.5 rounded-xl text-xs sm:text-sm font-black bg-indigo-900 hover:bg-indigo-950 text-white shadow-lg cursor-pointer transition-all flex items-center gap-2"
               >
                 <span>💾 Lưu toàn bộ & Đóng</span>
               </button>
@@ -2565,10 +2571,10 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
             <div className="flex-1 overflow-x-auto border border-slate-200 rounded-2xl max-h-[52vh] overflow-y-auto bg-white shadow-2xs">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50/90 sticky top-0 z-10 border-b border-slate-200 text-slate-600 font-extrabold uppercase text-[10px] tracking-wider">
-                    <th className="py-3 px-2 text-center whitespace-nowrap w-12">STT</th>
-                    <th className="py-3 px-3 whitespace-nowrap w-16">MÃ HS</th>
-                    <th className="py-3 px-4 whitespace-nowrap">TÊN HỌC SINH</th>
+                  <tr className="bg-slate-50/90 sticky top-0 z-20 border-b border-slate-200 text-slate-600 font-extrabold uppercase text-[10px] tracking-wider">
+                    <th className="py-3 px-2 text-center whitespace-nowrap w-12 sticky left-0 z-30 bg-slate-50">STT</th>
+                    <th className="py-3 px-3 whitespace-nowrap w-20 sticky left-12 z-30 bg-slate-50">MÃ HS</th>
+                    <th className="py-3 px-4 whitespace-nowrap sticky left-32 z-30 bg-slate-50 border-r-2 border-slate-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)]">TÊN HỌC SINH</th>
                     {Array.from({ length: detailAssignment?.questions?.length || 5 }).map((_, qIdx) => (
                       <th key={qIdx} className="py-3 px-2 text-center whitespace-nowrap font-black text-slate-700">
                         CÂU {qIdx + 1}
@@ -2622,17 +2628,17 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                       className="hover:bg-slate-50/80 transition-colors cursor-pointer group"
                     >
                       {/* STT */}
-                      <td className="py-3 px-2 text-center whitespace-nowrap font-bold text-slate-500">
+                      <td className="py-3 px-2 text-center whitespace-nowrap font-bold text-slate-500 sticky left-0 z-10 bg-white group-hover:bg-slate-50">
                         {index + 1}
                       </td>
 
                       {/* Mã HS */}
-                      <td className="py-3 px-3 whitespace-nowrap font-extrabold text-fuchsia-700">
+                      <td className="py-3 px-3 whitespace-nowrap font-extrabold text-fuchsia-700 sticky left-12 z-10 bg-white group-hover:bg-slate-50">
                         {st.code}
                       </td>
 
                       {/* Tên HS */}
-                      <td className="py-3 px-4 whitespace-nowrap font-bold text-slate-900 group-hover:text-indigo-900 transition-colors">
+                      <td className="py-3 px-4 whitespace-nowrap font-bold text-slate-900 group-hover:text-indigo-900 transition-colors sticky left-32 z-10 bg-white group-hover:bg-slate-50 border-r-2 border-slate-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)]">
                         {st.name}
                       </td>
 
@@ -3352,10 +3358,10 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                 <div className="overflow-x-auto max-h-80">
                   <table className="w-full text-left border-collapse text-xs">
                     <thead>
-                      <tr className="bg-slate-50 sticky top-0 z-10 border-b border-slate-200 text-slate-600 font-extrabold uppercase text-[10px] tracking-wider">
-                        <th className="py-2.5 px-3 text-center w-12">HẠNG</th>
-                        <th className="py-2.5 px-3 w-16">MÃ HS</th>
-                        <th className="py-2.5 px-4">HỌ VÀ TÊN</th>
+                      <tr className="bg-slate-50 sticky top-0 z-20 border-b border-slate-200 text-slate-600 font-extrabold uppercase text-[10px] tracking-wider">
+                        <th className="py-2.5 px-3 text-center w-12 sticky left-0 z-30 bg-slate-50">HẠNG</th>
+                        <th className="py-2.5 px-3 w-16 sticky left-12 z-30 bg-slate-50">MÃ HS</th>
+                        <th className="py-2.5 px-4 sticky left-28 z-30 bg-slate-50 border-r-2 border-slate-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)]">HỌ VÀ TÊN</th>
                         <th className="py-2.5 px-3 text-center">ĐIỂM SỐ</th>
                         <th className="py-2.5 px-3 text-center">THỜI GIAN LÀM</th>
                         <th className="py-2.5 px-4 text-center">DANH HIỆU / HUY HIỆU</th>
@@ -3364,23 +3370,26 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                     <tbody className="divide-y divide-slate-100">
                       {CLASS_3A_STUDENTS.map((st, idx) => {
                         let bgClass = 'hover:bg-slate-50';
+                        let cellBg = 'bg-white group-hover:bg-slate-50';
                         let badgeTitle = '⏳ Chưa nộp bài';
                         let badgeColor = 'bg-slate-100 text-slate-500 border-slate-200';
 
                         if (st.code === '3a1') {
                           bgClass = 'bg-amber-50/60 hover:bg-amber-50 font-bold';
+                          cellBg = 'bg-[#fefce8] group-hover:bg-amber-100/60';
                           badgeTitle = '🌟 Xuất sắc tuyệt đối';
                           badgeColor = 'bg-amber-100 text-amber-800 border-amber-300';
                         } else if (st.code === '3a10') {
                           bgClass = 'bg-slate-50/80 hover:bg-slate-100';
+                          cellBg = 'bg-slate-50 group-hover:bg-slate-100';
                           badgeTitle = '⚡ Cần cố gắng thêm';
                           badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
                         }
 
                         return (
-                          <tr key={st.code} className={`transition-colors ${bgClass}`}>
+                          <tr key={st.code} className={`group transition-colors ${bgClass}`}>
                             {/* Hạng */}
-                            <td className="py-2.5 px-3 text-center font-black">
+                            <td className={`py-2.5 px-3 text-center font-black sticky left-0 z-10 ${cellBg}`}>
                               {idx === 0 ? (
                                 <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-400 text-white font-black text-xs shadow-xs">
                                   1
@@ -3399,12 +3408,12 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                             </td>
 
                             {/* Mã HS */}
-                            <td className="py-2.5 px-3 font-extrabold text-fuchsia-700">
+                            <td className={`py-2.5 px-3 font-extrabold text-fuchsia-700 sticky left-12 z-10 ${cellBg}`}>
                               {st.code}
                             </td>
 
                             {/* Họ tên */}
-                            <td className="py-2.5 px-4 font-extrabold text-slate-800">
+                            <td className={`py-2.5 px-4 font-extrabold text-slate-800 sticky left-28 z-10 ${cellBg} border-r-2 border-slate-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)]`}>
                               {st.name}
                             </td>
 

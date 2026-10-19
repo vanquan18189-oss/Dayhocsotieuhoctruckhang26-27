@@ -21,16 +21,7 @@ export async function initializeAndSyncAllCollections(): Promise<{ success: bool
 
 
 
-    // 4. Check and seed 'elearning_lessons'
-    const lessonsSnap = await getDocs(collection(db, 'elearning_lessons'));
-    if (lessonsSnap.empty) {
-      const batch = trackedWriteBatch(db);
-      for (const lesson of INITIAL_LESSONS) {
-        const ref = doc(db, 'elearning_lessons', lesson.id);
-        batch.set(ref, lesson);
-      }
-      await batch.commit();
-    }
+    // All collections are strictly managed by user/teacher actions and not auto-seeded on startup
 
     // Questions are managed by admin/teachers and not auto-seeded on startup
 

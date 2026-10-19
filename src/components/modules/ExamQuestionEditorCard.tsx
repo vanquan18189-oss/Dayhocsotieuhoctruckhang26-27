@@ -20,7 +20,8 @@ import {
   matchesQuestionType, 
   normalizeQuestionType, 
   resetQuestionType, 
-  getDefaultAnswerDataForType 
+  getDefaultAnswerDataForType,
+  validateQuestion
 } from '../../lib/constants';
 
 export { normalizeQuestionType };
@@ -68,8 +69,19 @@ export const ExamQuestionEditorCard: React.FC<ExamQuestionEditorCardProps> = ({
     .map(s => s.trim())
     .filter(Boolean);
 
+  const validation = validateQuestion(question);
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xs hover:border-slate-300 transition-all">
+      {!validation.isValid && (
+        <div className="bg-amber-50 border-t border-b border-amber-200 px-4 py-2 flex items-center justify-between text-amber-800 text-xs font-bold">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+            <span>⚠ Câu {index + 1} ({getQuestionTypeLabel(question.type)}): {validation.errorMsg}</span>
+          </div>
+          <span className="text-[10px] bg-amber-200/60 text-amber-900 px-2 py-0.5 rounded-full font-extrabold uppercase">Cần sửa</span>
+        </div>
+      )}
       {/* Header Question */}
       <div className="flex flex-wrap items-center justify-between p-4 border-b border-slate-100 bg-slate-50/70 gap-3">
         <div className="flex items-center gap-3">

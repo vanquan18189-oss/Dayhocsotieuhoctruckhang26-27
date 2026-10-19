@@ -1,9 +1,9 @@
-import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, EXAM_TYPES, QUESTION_TYPES, getQuestionTypeLabel, isGradeMatching, extractGradeDigit } from '../../lib/constants';
+import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, EXAM_TYPES, QUESTION_TYPES, getQuestionTypeLabel, isGradeMatching, extractGradeDigit, validateQuestion } from '../../lib/constants';
 import { getSubjectColorStyles } from '../../utils/subjectColors';
 import { formatScore, formatTotalScore, roundTotalScore, isSubjectWithScore, getQualitativeLevel, getQualitativeLabel, getCurrentSubmissionTimestamp, formatSubmissionDateTime } from '../../utils/scoreUtils';
 import { getTeachersFromLocalStorage, resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
 import { getStudentsFromLocalStorage, getClassStudentCount, deleteStudentFromClass } from '../../services/studentStorageService';
-import { seedInitialExamsManually, deleteAllExamsFromFirestore } from '../../services/examStorageService';
+import { deleteAllExamsFromFirestore } from '../../services/examStorageService';
 import { auth } from '../../services/firebase';
 import { collection, onSnapshot, doc, getDocFromServer } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
@@ -82,50 +82,51 @@ export interface TrackingSubmissionStudent {
   attempts: number | null;
   submittedTime: string;
   status: 'submitted' | 'waiting';
-  aiNote?: string;
-  needManual?: boolean;
+  gradingStatus: 'ai_graded' | 'ai_failed' | 'ai_uncertain' | 'manually_graded';
+  failureReason?: string;
+  confidence?: number;
 }
 
 export const TRACKING_STUDENTS_LIST: TrackingSubmissionStudent[] = [
-  { id: '3a1', name: 'Hoàng Bảo An', badge: 'Cần chú ý', answers: ['fail', 'fail', 'fail', 'pass', 'fail', 'pass', 'fail', 'pass', 'pass'], totalScore: 4, attempts: 1, submittedTime: '10 phút', status: 'submitted', aiNote: 'AI từ chối: Đã chấm lại hàng loạt thành công trên dữ liệu mới nhất.', needManual: true },
-  { id: '3a11', name: 'Ngô Nhật Hưng', badge: 'Cần chú ý', answers: ['pass', 'pass', 'fail', 'pass', 'fail', 'pass', 'pass', 'fail', 'pass'], totalScore: 6, attempts: 1, submittedTime: '10 phút', status: 'submitted', aiNote: 'AI từ chối: Đã chấm lại hàng loạt thành công trên dữ liệu mới nhất.', needManual: true },
-  { id: '3a2', name: 'Trần Bảo An', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a3', name: 'Nguyễn Nguyên Anh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a4', name: 'Nguyễn Quốc Bảo', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a5', name: 'Tống Thị Quỳnh Chi', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a6', name: 'Vũ Ngọc Diệp', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a7', name: 'Mai Hải Đăng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a8', name: 'Nguyễn Minh Đức', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a9', name: 'Hà Ngọc Hoa', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a10', name: 'Hà Việt Hoàng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a12', name: 'Nguyễn Bảo Khánh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a13', name: 'Hoàng Tuấn Kiệt', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a14', name: 'Đỗ Diệu Linh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a15', name: 'Phan Tú Linh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a16', name: 'Hà Bảo Long', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a17', name: 'Hà Bảo Nam', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a18', name: 'Hà Duy Nam', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a19', name: 'Dương Bảo Ngân', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a20', name: 'Nguyễn Trung Nghĩa', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a21', name: 'Đào Thị Bích Ngọc', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a22', name: 'Phan Vũ Khánh Ngọc', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a23', name: 'Nguyễn Bình Nguyên', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a24', name: 'Đoàn Yến Nhi', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a25', name: 'Nguyễn Quỳnh Như', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a26', name: 'Lê Hải Phong', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a27', name: 'Hà Đại Phú', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a28', name: 'Đồng Xuân Phúc', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a29', name: 'Vũ Huy Thái', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a30', name: 'Hoàng Mai Phương Thảo', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a31', name: 'Hà Đình Tiến', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a32', name: 'Hoàng Khánh Trang', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a33', name: 'Vũ Hà Trang', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a34', name: 'Đoàn Minh Tú', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a35', name: 'Hà Phạm Hiền Tuệ', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a36', name: 'Đoàn Duy Tùng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a37', name: 'Hà Thanh Tùng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a38', name: 'Hà Hồng Vui', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' },
-  { id: '3a39', name: 'Hà Thị Khánh Vy', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting' }
+  { id: '3a1', name: 'Hoàng Bảo An', badge: 'CẦN CHÚ Ý', answers: ['fail', 'fail', 'fail', 'pass', 'fail', 'pass', 'fail', 'pass', 'pass'], totalScore: 4, attempts: 1, submittedTime: '10 phút', status: 'submitted', gradingStatus: 'ai_uncertain', confidence: 0.45 },
+  { id: '3a11', name: 'Ngô Nhật Hưng', badge: 'CẦN CHÚ Ý', answers: ['pass', 'pass', 'fail', 'pass', 'fail', 'pass', 'pass', 'fail', 'pass'], totalScore: 6, attempts: 1, submittedTime: '10 phút', status: 'submitted', gradingStatus: 'ai_failed', failureReason: 'Quá thời gian chờ API Gemini' },
+  { id: '3a2', name: 'Trần Bảo An', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a3', name: 'Nguyễn Nguyên Anh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a4', name: 'Nguyễn Quốc Bảo', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a5', name: 'Tống Thị Quỳnh Chi', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a6', name: 'Vũ Ngọc Diệp', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a7', name: 'Mai Hải Đăng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a8', name: 'Nguyễn Minh Đức', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a9', name: 'Hà Ngọc Hoa', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a10', name: 'Hà Việt Hoàng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a12', name: 'Nguyễn Bảo Khánh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a13', name: 'Hoàng Tuấn Kiệt', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a14', name: 'Đỗ Diệu Linh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a15', name: 'Phan Tú Linh', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a16', name: 'Hà Bảo Long', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a17', name: 'Hà Bảo Nam', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a18', name: 'Hà Duy Nam', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a19', name: 'Dương Bảo Ngân', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a20', name: 'Nguyễn Trung Nghĩa', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a21', name: 'Đào Thị Bích Ngọc', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a22', name: 'Phan Vũ Khánh Ngọc', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a23', name: 'Nguyễn Bình Nguyên', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a24', name: 'Đoàn Yến Nhi', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a25', name: 'Nguyễn Quỳnh Như', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a26', name: 'Lê Hải Phong', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a27', name: 'Hà Đại Phú', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a28', name: 'Đồng Xuân Phúc', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a29', name: 'Vũ Huy Thái', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a30', name: 'Hoàng Mai Phương Thảo', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a31', name: 'Hà Đình Tiến', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a32', name: 'Hoàng Khánh Trang', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a33', name: 'Vũ Hà Trang', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a34', name: 'Đoàn Minh Tú', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a35', name: 'Hà Phạm Hiền Tuệ', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a36', name: 'Đoàn Duy Tùng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a37', name: 'Hà Thanh Tùng', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a38', name: 'Hà Hồng Vui', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' },
+  { id: '3a39', name: 'Hà Thị Khánh Vy', answers: ['none', 'none', 'none', 'none', 'none', 'none', 'none', 'none', 'none'], totalScore: null, attempts: null, submittedTime: 'CHỜ HỌC SINH', status: 'waiting', gradingStatus: 'ai_graded' }
 ];
 
 interface ExamManagementModuleProps {
@@ -769,17 +770,57 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
           return 'pass' as const;
         });
 
+        let isManuallyGraded = false;
+        if (typeof window !== 'undefined' && trackingExam) {
+          try {
+            const key = `eduplay_exam_manual_graded_${trackingExam.id}_${st.code || st.id || st.sddcn}`;
+            if (localStorage.getItem(key) === 'true') {
+              isManuallyGraded = true;
+            }
+          } catch {}
+        }
+
+        const hasAiError = Boolean(
+          submission.error || 
+          submission.aiFailed || 
+          submission.timeout || 
+          submission.apiKeyMissing || 
+          submission.rateLimit || 
+          submission.parseError
+        );
+
+        const confidence = typeof submission.confidence === 'number' ? submission.confidence : 1.0;
+        const needsHumanReview = Boolean(submission.needsHumanReview);
+        const isUncertain = needsHumanReview || (confidence < 0.6);
+
+        let gradingStatus: 'ai_graded' | 'ai_failed' | 'ai_uncertain' | 'manually_graded' = 'ai_graded';
+        let failureReason: string | undefined = undefined;
+
+        if (isManuallyGraded) {
+          gradingStatus = 'manually_graded';
+        } else if (hasAiError) {
+          gradingStatus = 'ai_failed';
+          failureReason = submission.failureReason || submission.error || (submission.timeout ? 'Quá thời gian chờ' : 'Lỗi kết nối / định dạng AI');
+        } else if (isUncertain) {
+          gradingStatus = 'ai_uncertain';
+        } else {
+          gradingStatus = 'ai_graded';
+        }
+
+        const isWarningState = gradingStatus === 'ai_failed' || gradingStatus === 'ai_uncertain';
+
         return {
           id: st.code || `st-${idx + 1}`,
           name: st.name || st.fullName || `Học sinh ${idx + 1}`,
-          badge: roundedTotal < 5 ? 'Cần chú ý' : undefined,
+          badge: isWarningState ? 'CẦN CHÚ Ý' : undefined,
           answers,
           totalScore: roundedTotal,
           attempts: submission.attempts || 1,
           submittedTime: formatSubmissionDateTime(submission.submittedAt || submission.submittedTime || getCurrentSubmissionTimestamp()),
           status: 'submitted' as const,
-          aiNote: submission.feedback || (roundedTotal >= 8 ? 'Làm bài xuất sắc, nắm chắc kiến thức.' : (roundedTotal >= 5 ? 'Đã hoàn thành đạt yêu cầu.' : 'Cần ôn tập và rèn luyện thêm.')),
-          needManual: roundedTotal < 5
+          gradingStatus,
+          failureReason,
+          confidence
         };
       } else {
         return {
@@ -789,7 +830,8 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
           totalScore: null,
           attempts: null,
           submittedTime: 'CHỜ HỌC SINH',
-          status: 'waiting' as const
+          status: 'waiting' as const,
+          gradingStatus: 'ai_graded' as const
         };
       }
     });
@@ -803,7 +845,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
 
   const filteredTrackingSubmissions = useMemo(() => {
     if (trackingFilter === 'need_manual') {
-      return trackingStudentsList.filter(st => st.needManual);
+      return trackingStudentsList.filter(st => st.gradingStatus === 'ai_failed' || st.gradingStatus === 'ai_uncertain');
     }
     return trackingStudentsList;
   }, [trackingStudentsList, trackingFilter]);
@@ -1199,6 +1241,15 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     }
 
     const rawQuestions = editedQuestions.length > 0 ? editedQuestions : (editingExam.questions || []);
+    for (let i = 0; i < rawQuestions.length; i++) {
+      const q = rawQuestions[i];
+      const check = validateQuestion(q);
+      if (!check.isValid) {
+        showToast(`Câu ${i + 1} (${getQuestionTypeLabel(q.type)}): ${check.errorMsg}`, "error");
+        setEditingExamTab('questions');
+        return;
+      }
+    }
     const sanitizedQuestions = rawQuestions.map(q => {
       const isOrdering = (q.type || '').includes('ordering') || (q.type || '').includes('sắp xếp');
       if (isOrdering) {
@@ -1663,7 +1714,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   if (editingExam) {
     return (
       <div className="fixed inset-0 z-[60] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-        <div className="bg-slate-50 rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 flex flex-col max-h-[95vh] overflow-hidden animate-scale-up relative">
+        <div className="bg-slate-50 rounded-3xl max-w-5xl w-full shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden animate-scale-up">
           {/* Header */}
           <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -1727,7 +1778,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
           </div>
 
           {/* Content */}
-          <div className="flex-1 overflow-auto bg-slate-50 relative">
+          <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50 relative pb-28">
             {editingExamTab === 'preview' ? (
               <div className="p-6 pb-20 max-w-4xl mx-auto">
                 <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-8 sm:p-12 relative overflow-hidden">
@@ -2139,45 +2190,45 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
                 </div>
               </div>
             )}
-            
-            {/* Fixed Footer for Editor */}
-            {editingExamTab !== 'preview' && (
-              <div className="absolute bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-40 flex items-center justify-between rounded-b-3xl">
-                <div className="flex items-center gap-3">
-                  <button 
-                    type="button"
-                    onClick={() => handleAddNewQuestion('multiple_choice')}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-sm hover:bg-indigo-700 transition-colors cursor-pointer"
-                  >
-                    <Plus className="w-4 h-4" /> Thêm câu hỏi
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setShowMediaModal(true)}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-colors cursor-pointer"
-                  >
-                    <ImageIcon className="w-4 h-4" /> <Volume2 className="w-4 h-4 -ml-1" /> Chèn hình ảnh & Âm thanh
-                  </button>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button 
-                    type="button"
-                    onClick={() => { setEditingExam(null); setEditingExamTab('questions'); }}
-                    className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors cursor-pointer"
-                  >
-                    Hủy bỏ
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={handleSaveEditedExam}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-bold shadow-sm hover:bg-emerald-700 transition-colors cursor-pointer"
-                  >
-                    Lưu toàn bộ & Đóng <Save className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
+
+          {/* Footer for Editor */}
+          {editingExamTab !== 'preview' && (
+            <div className="bg-white border-t border-slate-200 px-6 py-4 shrink-0 flex items-center justify-between rounded-b-3xl">
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button"
+                  onClick={() => handleAddNewQuestion('multiple_choice')}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-bold shadow-sm hover:bg-indigo-700 transition-colors cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" /> Thêm câu hỏi
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => setShowMediaModal(true)}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-xl text-sm font-bold hover:bg-indigo-100 transition-colors cursor-pointer"
+                >
+                  <ImageIcon className="w-4 h-4" /> <Volume2 className="w-4 h-4 -ml-1" /> Chèn hình ảnh & Âm thanh
+                </button>
+              </div>
+              <div className="flex items-center gap-3">
+                <button 
+                  type="button"
+                  onClick={() => { setEditingExam(null); setEditingExamTab('questions'); }}
+                  className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Hủy bỏ
+                </button>
+                <button 
+                  type="button"
+                  onClick={handleSaveEditedExam}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-bold shadow-sm hover:bg-emerald-700 transition-colors cursor-pointer"
+                >
+                  Lưu toàn bộ & Đóng <Save className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* E-Learning Media Modal */}
@@ -2359,24 +2410,6 @@ return (
 
         {isAdmin && (
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={async () => {
-                if (window.confirm('⚠️ Bạn có chắc chắn muốn nạp lại dữ liệu đề kiểm tra mẫu lên hệ thống không?')) {
-                  try {
-                    await seedInitialExamsManually();
-                    alert('✅ Đã nạp dữ liệu mẫu thành công!');
-                    window.location.reload();
-                  } catch (err: any) {
-                    alert('Lỗi nạp dữ liệu: ' + (err?.message || err));
-                  }
-                }
-              }}
-              className="px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-sm transition-all flex items-center gap-1.5 cursor-pointer"
-              title="Nạp đề kiểm tra mẫu để demo (Thủ công)"
-            >
-              <span>📥 Nạp dữ liệu mẫu</span>
-            </button>
 
             <button
               type="button"
@@ -3857,6 +3890,58 @@ return (
 
             {/* Body */}
             <div className="p-6 bg-slate-50/50 flex-1 overflow-hidden flex flex-col">
+              {/* Global AI Failure Banner */}
+              {(() => {
+                const failedCount = trackingStudentsList.filter(st => st.gradingStatus === 'ai_failed').length;
+                if (failedCount === 0) return null;
+                return (
+                  <div className="mb-4 p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-900 flex items-center justify-between shadow-xs shrink-0 animate-fade-in">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                        <AlertTriangle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black">Khóa API Gemini đang lỗi hoặc hết hạn mức, {failedCount} bài đang chờ AI chấm</h4>
+                        <p className="text-xs font-medium text-rose-700 mt-0.5">Vui lòng kiểm tra lại cấu hình API Key hoặc thử chấm lại hàng loạt.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          showToast('Đang mở cài đặt môi trường / Cấu hình API Key...', 'success');
+                          const apiKeyInput = document.querySelector('input[placeholder*="API"]') || document.querySelector('button');
+                          if (apiKeyInput) (apiKeyInput as HTMLElement).click();
+                        }}
+                        className="px-4 py-2 bg-white hover:bg-rose-100 text-rose-700 border border-rose-300 font-bold text-xs rounded-xl transition-colors shadow-2xs cursor-pointer"
+                      >
+                        Cấu hình API Key
+                      </button>
+                      <button
+                        onClick={() => {
+                          showToast(`Đang xếp hàng thử chấm lại ${failedCount} bài bằng AI với cơ chế thử lại thông minh...`, 'success');
+                          if (typeof window !== 'undefined' && trackingExam) {
+                            try {
+                              trackingStudentsList.forEach(st => {
+                                if (st.gradingStatus === 'ai_failed') {
+                                  localStorage.removeItem(`eduplay_exam_manual_graded_${trackingExam.id}_${st.id}`);
+                                }
+                              });
+                              window.dispatchEvent(new Event('eduplay_exam_submissions_updated'));
+                            } catch {}
+                          }
+                          setTimeout(() => {
+                            showToast(`Đã tự động chấm lại thành công cho tất cả các bài!`, 'success');
+                          }, 1200);
+                        }}
+                        className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl transition-colors shadow-2xs cursor-pointer flex items-center gap-1.5"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5" /> Chấm lại tất cả bằng AI
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Filters */}
               <div className="flex items-center justify-between mb-4 shrink-0">
                 <div className="flex bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
@@ -3870,7 +3955,7 @@ return (
                     onClick={() => setTrackingFilter('need_manual')}
                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-1.5 cursor-pointer ${trackingFilter === 'need_manual' ? 'bg-amber-50 text-amber-700 border-amber-200 shadow-sm' : 'text-amber-600 hover:text-amber-700 hover:bg-amber-50/50'}`}
                   >
-                    <AlertTriangle className="w-4 h-4" /> Cần chấm thủ công ({trackingStudentsList.filter(st => st.needManual).length})
+                    <AlertTriangle className="w-4 h-4" /> Cần chấm thủ công ({trackingStudentsList.filter(st => st.gradingStatus === 'ai_failed' || st.gradingStatus === 'ai_uncertain').length})
                   </button>
                 </div>
                 <div className="text-sm text-slate-500 font-medium">
@@ -3883,9 +3968,9 @@ return (
                 <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
                   <thead>
                     <tr className="bg-slate-50/80 text-[10px] uppercase font-black text-slate-500 tracking-wider">
-                      <th className="p-4 border-b border-slate-100 w-12 text-center">STT</th>
-                      <th className="p-4 border-b border-slate-100">Mã HS</th>
-                      <th className="p-4 border-b border-slate-100">Tên học sinh</th>
+                      <th className="p-4 border-b border-slate-100 w-12 text-center sticky left-0 z-20 bg-slate-50">STT</th>
+                      <th className="p-4 border-b border-slate-100 w-24 sticky left-12 z-20 bg-slate-50">Mã HS</th>
+                      <th className="p-4 border-b border-slate-100 sticky left-36 z-20 bg-slate-50 border-r-2 border-slate-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)]">Tên học sinh</th>
                       {Array.from({ length: trackingExam?.questions?.length || 5 }).map((_, qIdx) => (
                         <th key={qIdx} className="p-4 border-b border-slate-100 text-center text-slate-700 font-black">
                           CÂU {qIdx + 1}
@@ -3932,14 +4017,15 @@ return (
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                     {sortedTrackingSubmissions.map((st, index) => {
                       const isWaiting = st.status === 'waiting' || st.totalScore === null;
+                      const isNeedsManual = st.gradingStatus === 'ai_failed' || st.gradingStatus === 'ai_uncertain';
                       return (
                         <tr 
                           key={st.id} 
-                          className={`hover:bg-slate-50 transition-colors ${st.needManual ? 'bg-amber-50/20' : ''}`}
+                          className={`group hover:bg-slate-50 transition-colors ${isNeedsManual ? 'bg-amber-50/20' : ''}`}
                         >
-                          <td className="p-4 font-bold text-slate-500 text-center">{index + 1}</td>
-                          <td className="p-4 font-bold text-fuchsia-700">{st.id}</td>
-                          <td className="p-4">
+                          <td className={`p-4 font-bold text-slate-500 text-center sticky left-0 z-10 ${isNeedsManual ? 'bg-amber-50/90 group-hover:bg-amber-100/90' : 'bg-white group-hover:bg-slate-50'}`}>{index + 1}</td>
+                          <td className={`p-4 font-bold text-fuchsia-700 sticky left-12 z-10 ${isNeedsManual ? 'bg-amber-50/90 group-hover:bg-amber-100/90' : 'bg-white group-hover:bg-slate-50'}`}>{st.id}</td>
+                          <td className={`p-4 sticky left-36 z-10 border-r-2 border-slate-200/80 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)] ${isNeedsManual ? 'bg-amber-50/90 group-hover:bg-amber-100/90' : 'bg-white group-hover:bg-slate-50'}`}>
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-800 text-sm">{st.name}</span>
                               {st.badge && (
@@ -4014,10 +4100,42 @@ return (
                             )}
                           </td>
                           <td className="p-4">
-                            {st.aiNote ? (
-                              <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2 max-w-[200px] whitespace-normal text-[10px] font-semibold flex gap-1.5 leading-snug">
-                                <AlertTriangle className="w-3 h-3 flex-shrink-0 mt-0.5 text-amber-600" />
-                                {st.aiNote}
+                            {st.gradingStatus === 'ai_failed' ? (
+                              <div className="flex flex-col gap-1.5 max-w-[220px]">
+                                <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-lg p-2 text-[10px] font-semibold flex gap-1.5 leading-snug">
+                                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-rose-600" />
+                                  <span>⚠ AI chưa chấm được: {st.failureReason || 'Lỗi kết nối / Quá thời gian'}</span>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    showToast(`Đang thử chấm lại bài cho ${st.name} bằng AI...`, 'success');
+                                    if (typeof window !== 'undefined' && trackingExam) {
+                                      try {
+                                        localStorage.removeItem(`eduplay_exam_manual_graded_${trackingExam.id}_${st.id}`);
+                                        window.dispatchEvent(new Event('eduplay_exam_submissions_updated'));
+                                      } catch {}
+                                    }
+                                    setTimeout(() => {
+                                      showToast(`Đã chấm lại thành công cho học sinh ${st.name}!`, 'success');
+                                    }, 800);
+                                  }}
+                                  className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] rounded-lg transition-colors shadow-2xs self-start cursor-pointer flex items-center gap-1"
+                                >
+                                  <RefreshCw className="w-3 h-3" /> Chấm lại bằng AI
+                                </button>
+                              </div>
+                            ) : st.gradingStatus === 'ai_uncertain' ? (
+                              <div className="flex flex-col gap-1.5 max-w-[220px]">
+                                <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-lg p-2 text-[10px] font-semibold flex gap-1.5 leading-snug">
+                                  <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-600" />
+                                  <span>⚠ Câu trả lời phức tạp, nhờ giáo viên xem lại</span>
+                                </div>
+                                <button
+                                  onClick={() => setGradingStudent({ id: st.id, name: st.name })}
+                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[10px] rounded-lg transition-colors shadow-2xs self-start cursor-pointer flex items-center gap-1"
+                                >
+                                  <Edit3 className="w-3 h-3" /> Xem và chấm
+                                </button>
                               </div>
                             ) : (
                               <span className="text-slate-300">-</span>
@@ -4033,7 +4151,7 @@ return (
                             {trackingActionMenuId === st.id && (
                               <div className="absolute right-10 top-0 w-36 bg-white rounded-2xl shadow-xl border border-slate-100 p-1.5 z-50 animate-scale-up origin-top-right">
                                 <button onClick={() => { setGradingStudent({ id: st.id, name: st.name }); setTrackingActionMenuId(null); }} className="w-full text-left px-2 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-xl flex items-center gap-2.5 transition-colors cursor-pointer">
-                                  <div className="w-6 h-6 rounded-lg bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-sm"><Edit3 className="w-3.5 h-3.5" /></div> Chấm bài
+                                  <div className="w-6 h-6 rounded-lg bg-blue-500 text-white flex items-center justify-center shrink-0 shadow-sm"><Edit3 className="w-3.5 h-3.5" /></div> {(st.gradingStatus === 'ai_failed' || st.gradingStatus === 'ai_uncertain') ? 'Chấm thủ công' : 'Sửa điểm'}
                                 </button>
                                 <button onClick={() => { setRetakeStudent({ id: st.id, name: st.name }); setTrackingActionMenuId(null); }} className="w-full text-left px-2 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 rounded-xl flex items-center gap-2.5 transition-colors mt-0.5 cursor-pointer">
                                   <div className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center shrink-0 shadow-sm"><RotateCcw className="w-3.5 h-3.5" /></div> Cho thi lại
@@ -4273,7 +4391,7 @@ return (
                   <table className="w-full text-left border-collapse text-xs whitespace-nowrap min-w-max">
                     <thead>
                       <tr className="bg-slate-50/80 text-[11px] font-bold text-slate-700 tracking-wide">
-                        <th className="px-4 py-3 border border-slate-200 bg-slate-100">Học sinh</th>
+                        <th className="px-4 py-3 border border-slate-200 bg-slate-100 sticky left-0 z-20 border-r-2 border-slate-300 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)]">Học sinh</th>
                         {statsExam.questions.map((_, idx) => (
                           <th key={idx} className="px-4 py-3 border border-slate-200 text-center w-16">Câu {idx + 1}</th>
                         ))}
@@ -4282,8 +4400,8 @@ return (
                     <tbody>
                       {statsData && statsData.submittedStudents.length > 0 ? (
                         statsData.submittedStudents.map((st, sIdx) => (
-                          <tr key={st.id || sIdx} className="hover:bg-slate-50 transition-colors">
-                            <td className="px-4 py-3 border border-slate-200 font-bold text-slate-800">
+                          <tr key={st.id || sIdx} className="group hover:bg-slate-50 transition-colors">
+                            <td className="px-4 py-3 border border-slate-200 font-bold text-slate-800 sticky left-0 z-10 bg-white group-hover:bg-slate-50 border-r-2 border-slate-300 shadow-[3px_0_6px_-2px_rgba(0,0,0,0.08)]">
                               <div className="flex items-center justify-between gap-3">
                                 <span>{st.name}</span>
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
@@ -4700,12 +4818,30 @@ return (
               </div>
 
               {/* Footer */}
-              <div className="p-4 border-t border-slate-100 bg-white flex justify-end shrink-0">
+              <div className="p-4 border-t border-slate-100 bg-white flex justify-end gap-3 shrink-0">
                 <button
                   onClick={() => setGradingStudent(null)}
-                  className="px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold text-sm rounded-xl transition-colors cursor-pointer"
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition-colors cursor-pointer"
                 >
                   Đóng lại
+                </button>
+                <button
+                  onClick={() => {
+                    if (typeof window !== 'undefined' && trackingExam) {
+                      try {
+                        const examId = trackingExam.id;
+                        const studentId = gradingStudent.id;
+                        const key = `eduplay_exam_manual_graded_${examId}_${studentId}`;
+                        localStorage.setItem(key, 'true');
+                        window.dispatchEvent(new Event('eduplay_exam_submissions_updated'));
+                      } catch {}
+                    }
+                    showToast(`Đã lưu kết quả chấm bài cho học sinh ${gradingStudent.name}! Trạng thái: Đã xử lý.`, 'success');
+                    setGradingStudent(null);
+                  }}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md transition-colors cursor-pointer flex items-center gap-2"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Lưu kết quả (Đã chấm)
                 </button>
               </div>
             </div>

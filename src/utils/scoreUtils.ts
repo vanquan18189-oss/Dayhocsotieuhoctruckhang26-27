@@ -116,3 +116,90 @@ export function getQualitativeLabel(
 
   return str;
 }
+
+export interface Circular27Evaluation {
+  level: 'HTT' | 'HT' | 'CHT';
+  levelLabel: string;
+  badgeClass: string;
+  text: string;
+}
+
+/**
+ * Tự động tạo đánh giá Mức đạt (HTT / HT / CHT) & nhận xét sư phạm chuẩn Thông tư 27/2020/TT-BGDĐT
+ */
+export function getCircular27Evaluation(
+  studentName?: string,
+  score?: number | string | null,
+  answers?: Array<'pass' | 'fail' | 'none'>
+): Circular27Evaluation {
+  const numScore = score === null || score === undefined ? 8 : (typeof score === 'number' ? score : parseFloat(String(score)) || 8);
+  const rounded = Math.round(numScore);
+  const cleanName = studentName ? studentName.trim() : 'Em';
+  const namePart = cleanName.startsWith('Em') ? cleanName : `Em ${cleanName.split(' ').pop()}`;
+
+  // Tìm các câu làm chưa đúng nếu có dữ liệu mảng answers
+  const wrongIndices: number[] = [];
+  if (Array.isArray(answers)) {
+    answers.forEach((ans, i) => {
+      if (ans === 'fail') wrongIndices.push(i + 1);
+    });
+  }
+
+  // 1. Hoàn thành tốt (HTT) - >= 90% (>= 9.0)
+  if (rounded >= 9) {
+    let comment = `${namePart} nắm rất chắc kiến thức, tư duy nhanh nhạy và hoàn thành xuất sắc các yêu cầu của bài học. Cứ phát huy tinh thần này nhé!`;
+    if (rounded === 10) {
+      const templates = [
+        `${namePart} nắm rất chắc kiến thức, tư duy nhanh nhạy và hoàn thành xuất sắc các yêu cầu của bài học. Cứ phát huy tinh thần này nhé!`,
+        `${namePart} hoàn thành xuất sắc bài kiểm tra, tư duy nhanh và chính xác. Đáng khen ngợi!`,
+        `Bài làm đạt kết quả tối đa, ${namePart.toLowerCase()} vận dụng tốt các kiến thức đã học. Tuyên dương em!`
+      ];
+      comment = templates[(cleanName.length + rounded) % templates.length];
+    }
+
+    return {
+      level: 'HTT',
+      levelLabel: 'Hoàn thành tốt',
+      badgeClass: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+      text: comment
+    };
+  }
+
+  // 2. Hoàn thành (HT) - 50% đến < 90% (5.0 đến 8.9)
+  if (rounded >= 5) {
+    let comment = `${namePart} đã hoàn thành tốt các nội dung cơ bản của bài học. Cần chú ý đọc kỹ đề hơn ở một vài câu vận dụng để đạt kết quả cao hơn nữa nhé.`;
+    if (wrongIndices.length > 0 && wrongIndices.length <= 3) {
+      const wrongListStr = wrongIndices.map(i => `Câu ${i}`).join(', ');
+      comment = `${namePart} đã hoàn thành tốt các nội dung cơ bản, cần chú ý đọc kỹ đề bài và ôn tập lại kiến thức ở ${wrongListStr} nhé.`;
+    }
+
+    return {
+      level: 'HT',
+      levelLabel: 'Hoàn thành',
+      badgeClass: 'bg-sky-100 text-sky-800 border-sky-300',
+      text: comment
+    };
+  }
+
+  // 3. Chưa hoàn thành (CHT) - < 50% (< 5.0)
+  let comment = `${namePart} cần cô hướng dẫn thêm và ôn tập lại nội dung bài học này để nắm vững kiến thức cơ bản hơn nhé. Cố gắng lên em!`;
+  if (wrongIndices.length > 0) {
+    const wrongListStr = wrongIndices.slice(0, 3).map(i => `Câu ${i}`).join(', ');
+    comment = `${namePart} chưa nắm vững kiến thức ở ${wrongListStr}. Em cần ôn tập kỹ lại lý thuyết và luyện tập thêm bài tập nhé. Cố gắng lên em!`;
+  }
+
+  return {
+    level: 'CHT',
+    levelLabel: 'Chưa hoàn thành',
+    badgeClass: 'bg-amber-100 text-amber-800 border-amber-300',
+    text: comment
+  };
+}
+
+export function generateCircular27Comment(
+  studentName?: string,
+  score?: number | string | null,
+  answers?: Array<'pass' | 'fail' | 'none'>
+): string {
+  return getCircular27Evaluation(studentName, score, answers).text;
+}

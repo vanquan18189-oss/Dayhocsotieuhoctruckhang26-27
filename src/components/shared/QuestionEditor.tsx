@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, ChevronDown, ImageIcon, Upload, X, ArrowRight, ArrowUp, ArrowDown, GripVertical } from 'lucide-react';
 import { QuestionItem, TrueFalseStatement } from '../../types';
-import { QUESTION_TYPES, normalizeQuestionType, resetQuestionType, getDefaultAnswerDataForType } from '../../lib/constants';
+import { QUESTION_TYPES, normalizeQuestionType, resetQuestionType, getDefaultAnswerDataForType, normalizeMatchingPairs } from '../../lib/constants';
 import { uploadToCloudinary } from '../../lib/cloudinary';
 
 interface QuestionEditorProps {
@@ -25,9 +25,10 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
   const [content, setContent] = useState<string>(question.content || '');
   const [options, setOptions] = useState<string[]>(question.options || ['', '', '', '']);
   const [correctAnswer, setCorrectAnswer] = useState<string>(question.correctAnswer || 'A');
-  const [matchingPairs, setMatchingPairs] = useState<{ left: string; right: string }[]>(
-    question.matchingPairs || [{ left: '', right: '' }, { left: '', right: '' }]
-  );
+  const [matchingPairs, setMatchingPairs] = useState<{ left: string; right: string }[]>(() => {
+    const norm = normalizeMatchingPairs(question);
+    return norm.length > 0 ? norm : [{ left: '', right: '' }, { left: '', right: '' }];
+  });
   const [classificationGroups, setClassificationGroups] = useState<string[]>(
     question.classificationGroups || ['Nhóm 1', 'Nhóm 2']
   );
@@ -45,7 +46,8 @@ export const QuestionEditor: React.FC<QuestionEditorProps> = ({
     setContent(question.content || '');
     setOptions(question.options || (normalizedType === 'ordering' ? ['Bước 1', 'Bước 2', 'Bước 3'] : ['', '', '', '']));
     setCorrectAnswer(question.correctAnswer || (normalizedType === 'true_false' ? '' : 'A'));
-    setMatchingPairs(question.matchingPairs || [{ left: '', right: '' }, { left: '', right: '' }]);
+    const norm = normalizeMatchingPairs(question);
+    setMatchingPairs(norm.length > 0 ? norm : [{ left: '', right: '' }, { left: '', right: '' }]);
     setClassificationGroups(question.classificationGroups || ['Nhóm 1', 'Nhóm 2']);
     setClassificationItems(question.classificationItems || [{ name: '', group: 'Nhóm 1' }]);
     setStatements(question.statements || [{ statement: 'Phát biểu đúng/sai', isCorrect: true }]);

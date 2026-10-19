@@ -1,5 +1,5 @@
 import { QuestionItem } from '../types';
-import { extractTrueOrderingFromQuestion } from '../lib/constants';
+import { extractTrueOrderingFromQuestion, normalizeMatchingPairs, validateQuestion, normalizeQuestionType } from '../lib/constants';
 import { extractGradeDigit } from './classStorageService';
 
 export const extractCanonicalOrdering = extractTrueOrderingFromQuestion;
@@ -172,12 +172,17 @@ export function sanitizeQuestionForFirestore(q: QuestionItem): QuestionItem {
     }));
   }
 
-  if (Array.isArray(q.matchingPairs) && q.matchingPairs.length > 0) {
-    cleanQ.matchingPairs = q.matchingPairs.map(p => ({
-      left: p.left || '',
-      right: p.right || '',
-      match: p.match || ''
-    }));
+  const normType = normalizeQuestionType(q.type);
+  const isMatching = normType === 'matching' || q.type === 'nối cặp';
+  if (isMatching || (Array.isArray(q.matchingPairs) && q.matchingPairs.length > 0) || q['Cột A'] || q['Cột B']) {
+    const extractedPairs = normalizeMatchingPairs(q);
+    cleanQ.matchingPairs = extractedPairs.length >= 2
+      ? extractedPairs
+      : [
+          { left: 'Vế A 1', right: 'Vế B 1' },
+          { left: 'Vế A 2', right: 'Vế B 2' },
+          { left: 'Vế A 3', right: 'Vế B 3' }
+        ];
   }
 
   if (q.authorName) cleanQ.authorName = q.authorName;

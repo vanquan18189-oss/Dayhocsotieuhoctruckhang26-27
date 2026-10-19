@@ -38,7 +38,7 @@ import {
 import { QuestionItem, CognitiveLevel, UserRole } from '../../types';
 import { PRIMARY_SCHOOL_SUBJECTS } from '../../services/mockData';
 import { QUESTION_TYPES, getQuestionTypeLabel, matchesQuestionType, normalizeQuestionType, getCorrectOrderingSequence } from '../../lib/constants';
-import { sanitizeQuestionForFirestore, fetchQuestionsFromFirestore, subscribeToQuestionsFromFirestore, getLocalCachedQuestions, deleteQuestionFromFirestore, deleteQuestionsBatchFromFirestore, saveQuestionsBatchToFirestore, downloadQuestionsAsJSON, downloadQuestionsAsCSV, seedInitialQuestionsManually } from '../../services/questionStorageService';
+import { sanitizeQuestionForFirestore, fetchQuestionsFromFirestore, subscribeToQuestionsFromFirestore, getLocalCachedQuestions, deleteQuestionFromFirestore, deleteQuestionsBatchFromFirestore, saveQuestionsBatchToFirestore, downloadQuestionsAsJSON, downloadQuestionsAsCSV } from '../../services/questionStorageService';
 import { downloadQuestionBankTemplate, exportQuestionBankToExcel } from '../../services/excelService';
 import { generateExamQuestionsAI, cleanRawExamText } from '../../services/geminiService';
 import { QuestionAiModal } from './QuestionAiModal';
@@ -1269,23 +1269,6 @@ export const QuestionBankModule: React.FC<QuestionBankModuleProps> = ({
 
         {userRole !== 'student' && (
           <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto">
-            {isAdmin && (
-              <button
-                onClick={async () => {
-                  try {
-                    await seedInitialQuestionsManually();
-                    showToast('✅ Đã nạp danh sách câu hỏi mẫu thành công!', 'success');
-                  } catch (err: any) {
-                    showToast(`Lỗi nạp câu hỏi mẫu: ${err?.message || String(err)}`, 'error');
-                  }
-                }}
-                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs sm:text-sm font-semibold shadow-md flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
-                title="Nạp thủ công bộ câu hỏi mẫu mặc định vào hệ thống"
-              >
-                <Database className="w-4 h-4 text-amber-200" />
-                <span>Nạp câu hỏi mẫu</span>
-              </button>
-            )}
 
             <button
               onClick={() => {
@@ -2012,12 +1995,11 @@ export const QuestionBankModule: React.FC<QuestionBankModuleProps> = ({
             </div>
 
             <div
-              onClick={handleImportSampleExcel}
               className="border-2 border-dashed border-emerald-200 rounded-2xl p-6 text-center bg-emerald-50/50 space-y-2 cursor-pointer hover:bg-emerald-50 transition-colors"
             >
               <Upload className="w-8 h-8 text-emerald-600 mx-auto" />
               <div className="text-xs font-bold text-slate-800">
-                Kéo thả file Excel (.xlsx) hoặc bấm để nạp dữ liệu mẫu
+                Kéo thả file Excel (.xlsx) hoặc bấm để chọn tệp
               </div>
               <p className="text-[10px] text-slate-500 font-medium">
                 Hỗ trợ định dạng chuẩn: .xlsx (Microsoft Excel 2007+)
@@ -2030,12 +2012,6 @@ export const QuestionBankModule: React.FC<QuestionBankModuleProps> = ({
                 className="px-4 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg cursor-pointer"
               >
                 Đóng
-              </button>
-              <button
-                onClick={handleImportSampleExcel}
-                className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm cursor-pointer active:scale-95"
-              >
-                Nạp Dữ Liệu Mẫu
               </button>
             </div>
           </div>

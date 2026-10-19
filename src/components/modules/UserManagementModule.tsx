@@ -648,6 +648,17 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
     return getAllStudentsFromLocalStorage();
   });
   const [isStudentsLoading, setIsStudentsLoading] = useState<boolean>(true);
+  const [liveClassStats, setLiveClassStats] = useState<Record<string, { total: number; male: number; female: number }>>({});
+
+  useEffect(() => {
+    fetchClassStatistics()
+      .then((stats) => {
+        if (stats && Object.keys(stats).length > 0) {
+          setLiveClassStats(stats);
+        }
+      })
+      .catch((err) => console.warn('Lỗi tải thống kê học sinh:', err));
+  }, [studentDatabase]);
 
   // 1. Initial Mount Sync: Setup real-time Firestore listeners & proactive fetch
   useEffect(() => {
@@ -655,8 +666,11 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
     fetchAllStudentsFromFirestore()
       .then((remoteDb) => {
         const cleaned = remoteDb || {};
-        setStudentDatabase(cleaned);
-        saveAllStudentsToLocalStorage(cleaned);
+        setStudentDatabase((prev) => {
+          const merged = { ...prev, ...cleaned };
+          saveAllStudentsToLocalStorage(merged);
+          return merged;
+        });
         setIsStudentsLoading(false);
       })
       .catch(() => {
@@ -735,14 +749,15 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
               }
             });
           }
-          // Strictly synchronize: if Firestore has 0 student rosters, cloudRosters is {}
-          setStudentDatabase(cloudRosters);
-          saveAllStudentsToLocalStorage(cloudRosters);
+          setStudentDatabase((prev) => {
+            const merged = { ...prev, ...cloudRosters };
+            saveAllStudentsToLocalStorage(merged);
+            return merged;
+          });
           setIsStudentsLoading(false);
         },
         (err) => {
           console.warn('Error listening to class_rosters in Firestore:', err);
-          setStudentDatabase({});
           setIsStudentsLoading(false);
         }
       );
@@ -1452,17 +1467,25 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
       studentDatabase[stdName] ||
       studentDatabase[key] ||
       [];
-    let male = 0;
-    let female = 0;
-    students.forEach((s) => {
-      const g = (s.gender || (s as any).gioiTinh || (s as any).sex || '').toString().trim().toLowerCase();
-      if (g === 'nam' || g === 'male' || g === 'm') {
-        male++;
-      } else if (g === 'nữ' || g === 'nu' || g === 'female' || g === 'f') {
-        female++;
-      }
-    });
-    return { total: students.length, male, female };
+    if (students.length > 0) {
+      let male = 0;
+      let female = 0;
+      students.forEach((s) => {
+        const g = (s.gender || (s as any).gioiTinh || (s as any).sex || '').toString().trim().toLowerCase();
+        if (g === 'nam' || g === 'male' || g === 'm') {
+          male++;
+        } else if (g === 'nữ' || g === 'nu' || g === 'female' || g === 'f') {
+          female++;
+        }
+      });
+      return { total: students.length, male, female };
+    }
+
+    if (liveClassStats[className] || liveClassStats[stdName] || liveClassStats[key]) {
+      return liveClassStats[className] || liveClassStats[stdName] || liveClassStats[key];
+    }
+
+    return { total: 0, male: 0, female: 0 };
   };
 
   // Helper to get stats for a block dynamically from studentDatabase & Firestore queries
@@ -1484,11 +1507,20 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
       }
     });
 
-    // 2. Also dynamically scan all class rosters in studentDatabase matching this grade number
+    // 2. Scan studentDatabase keys matching gradeNum
     Object.keys(studentDatabase).forEach((key) => {
       const stdName = getStandardClassName(key);
       const keyGradeNum = stdName.replace(/[^0-9]/g, '');
       if (keyGradeNum === gradeNum) {
+        classNamesSet.add(stdName);
+      }
+    });
+
+    // 3. Scan liveClassStats keys
+    Object.keys(liveClassStats).forEach((key) => {
+      const stdName = getStandardClassName(key);
+      const keyGradeNum = stdName.replace(/[^0-9]/g, '');
+      if (keyGradeNum === gradeNum && !key.startsWith('Khối ')) {
         classNamesSet.add(stdName);
       }
     });
@@ -1509,6 +1541,15 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
       male += stats.male;
       female += stats.female;
     });
+
+    if (total === 0) {
+      if (liveClassStats[gradeName] && liveClassStats[gradeName].total > 0) {
+        return liveClassStats[gradeName];
+      }
+      if (liveClassStats[gradeNum] && liveClassStats[gradeNum].total > 0) {
+        return liveClassStats[gradeNum];
+      }
+    }
 
     return { total, male, female };
   };

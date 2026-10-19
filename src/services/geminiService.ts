@@ -5,6 +5,7 @@ import mammoth from 'mammoth';
 import { LatencyTestResult, Lesson5EPlan, QuestionItem } from '../types';
 import { extractCanonicalOrdering } from './questionStorageService';
 import { cleanQuestionMath } from '../utils/mathFormatter';
+import { normalizeMatchingPairs, validateQuestion } from '../lib/constants';
 
 const STORAGE_KEYS = [
   'eduplay_gemini_api_key',
@@ -895,7 +896,7 @@ YÊU CẦU:
         statements: item.statements || undefined,
         classificationGroups: item.classificationGroups || undefined,
         classificationItems: item.classificationItems || undefined,
-        matchingPairs: item.matchingPairs || undefined,
+        matchingPairs: (qType === 'matching' || qType === 'nối cặp' || (Array.isArray(item.matchingPairs) && item.matchingPairs.length > 0) || item['Cột A'] || item['Cột B']) ? (normalizeMatchingPairs(item).length >= 2 ? normalizeMatchingPairs(item) : [{ left: 'Vế A 1', right: 'Vế B 1' }, { left: 'Vế A 2', right: 'Vế B 2' }, { left: 'Vế A 3', right: 'Vế B 3' }]) : undefined,
         correctAnswer,
         explanation: item.explanation || 'Hướng dẫn giải chi tiết theo chuẩn sư phạm.',
       });

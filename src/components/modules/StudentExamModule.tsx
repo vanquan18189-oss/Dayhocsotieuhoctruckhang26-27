@@ -25,7 +25,7 @@ import { StatsSummaryRow } from '../common/StatsSummaryRow';
 import { getSubjectColorStyles } from '../../utils/subjectColors';
 import { ExamPaper, QuestionItem } from '../../types';
 import { awardExamReward, awardAssignmentReward } from '../../config/rewardConfig';
-import { matchesQuestionType, isMultipleResponse, getCorrectOrderingSequence } from '../../lib/constants';
+import { matchesQuestionType, isMultipleResponse, getCorrectOrderingSequence, normalizeMatchingPairs, shuffleOrdering } from '../../lib/constants';
 import { QuizLiveSidebar } from './QuizLiveSidebar';
 import {
   joinQuizLiveSession,
@@ -83,25 +83,108 @@ const isExamSubmission = (sub: any): boolean => {
   return true;
 };
 
+export const getNormalizedMatchingPairs = (q: any): { left: string; right: string }[] => {
+  return normalizeMatchingPairs(q);
+};
+
+const MatchingQuestionRenderer: React.FC<{
+  q: QuestionItem;
+  idx: number;
+  activeExamSession: any;
+  setActiveExamSession: React.Dispatch<React.SetStateAction<any>>;
+}> = ({ q, idx, activeExamSession, setActiveExamSession }) => {
+  const matchingPairsList = getNormalizedMatchingPairs(q);
+
+  const shuffledRightOptions = useMemo(() => {
+    const rights = matchingPairsList.map(p => p.right);
+    const shuffled = [...rights];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }, [q.id, idx, matchingPairsList.length]);
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-indigo-50 border border-indigo-100 p-3.5 rounded-2xl text-indigo-950 text-xs sm:text-sm font-semibold flex items-center gap-2">
+        <span>🔗</span>
+        <span>Hãy chọn ghép nối tương ứng cho mỗi khái niệm dưới đây:</span>
+      </div>
+      <div className="space-y-3">
+        {matchingPairsList.map((pair, pIdx) => {
+          const currentAnswers = activeExamSession.answers[idx] || {};
+          const selectedRightVal = currentAnswers[pIdx] !== undefined ? currentAnswers[pIdx] : (currentAnswers[pair.left] || '');
+          return (
+            <div key={pIdx} className="p-4 bg-white border-2 border-slate-100 hover:border-slate-200 rounded-2xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 transition-all">
+              <div className="flex-1 flex items-start gap-3">
+                <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
+                  {pIdx + 1}
+                </div>
+                <span className="text-xs sm:text-sm font-bold text-slate-800">{pair.left}</span>
+              </div>
+              <div className="text-slate-300 hidden md:block">➔</div>
+              <div className="flex-1">
+                <select
+                  value={selectedRightVal}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setActiveExamSession(prev => {
+                      if (!prev) return null;
+                      const answers = { ...prev.answers };
+                      const currentAns = answers[idx] && typeof answers[idx] === 'object' ? answers[idx] : {};
+                      const updatedMatching = { ...currentAns, [pIdx]: val, [pair.left]: val };
+                      answers[idx] = updatedMatching;
+                      return { ...prev, answers, currentQuestionIndex: idx };
+                    });
+                  }}
+                  className="w-full px-3 py-2.5 bg-slate-50 hover:bg-slate-100 border-2 border-slate-200 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 rounded-xl text-slate-800 text-xs sm:text-sm font-semibold focus:outline-none transition-all cursor-pointer whitespace-normal"
+                >
+                  <option value="" className="font-bold text-slate-400">-- Chọn đáp án ghép nối --</option>
+                  {shuffledRightOptions.map((rightText, optIdx) => {
+                    const letter = String.fromCharCode(65 + optIdx);
+                    return (
+                      <option key={optIdx} value={rightText} className="font-semibold text-slate-700">
+                        {letter}. {rightText}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export const checkQuestionCorrectLocal = (qi: QuestionItem, choice: any): boolean => {
   if (!qi) return false;
   try {
     if (isMatchingQuestion(qi)) {
       const studentPairs = (typeof choice === 'object' && choice !== null) ? choice : {};
-      const pairs = qi.matchingPairs || [];
+      const pairs = getNormalizedMatchingPairs(qi);
       if (pairs.length === 0) return false;
       return pairs.every((pair, pIdx) => {
         const studentSelected = studentPairs[pIdx] !== undefined ? studentPairs[pIdx] : studentPairs[pair.left];
         if (studentSelected === undefined || studentSelected === null || studentSelected === '') return false;
 
         const correctRightStr = String(pair.right || '').trim().toLowerCase();
+        const selStr = String(studentSelected).trim().toLowerCase();
 
-        // 1. So sánh trực tiếp chuỗi nội dung vế phải đã cấu hình trong ngân hàng câu hỏi
-        if (String(studentSelected).trim().toLowerCase() === correctRightStr) {
+        if (selStr === correctRightStr) {
           return true;
         }
 
-        // 2. Trường hợp lựa chọn là số index tương ứng
+        const selectedLetterIdx = selStr.charCodeAt(0) - 97;
+        if (selStr.length === 1 && selectedLetterIdx >= 0 && selectedLetterIdx < pairs.length) {
+          if (selectedLetterIdx === pIdx) return true;
+          if (pairs[selectedLetterIdx] && String(pairs[selectedLetterIdx].right || '').trim().toLowerCase() === correctRightStr) {
+            return true;
+          }
+        }
+
         if (typeof studentSelected === 'number') {
           if (studentSelected === pIdx) return true;
           if (pairs[studentSelected] && String(pairs[studentSelected].right || '').trim().toLowerCase() === correctRightStr) {
@@ -109,9 +192,8 @@ export const checkQuestionCorrectLocal = (qi: QuestionItem, choice: any): boolea
           }
         }
 
-        // 3. Dự phòng trường hợp học sinh chỉ chọn ký tự tiền tố (a, b, c, d...)
         const rightPrefixMatch = correctRightStr.match(/^([a-z0-9])[\.\:\)\-]/i);
-        if (rightPrefixMatch && String(studentSelected).trim().toLowerCase() === rightPrefixMatch[1].toLowerCase()) {
+        if (rightPrefixMatch && selStr === rightPrefixMatch[1].toLowerCase()) {
           return true;
         }
 
@@ -120,7 +202,9 @@ export const checkQuestionCorrectLocal = (qi: QuestionItem, choice: any): boolea
     }
 
     if (isOrderingQuestion(qi)) {
-      const studentOrder = Array.isArray(choice) ? choice : [];
+      const studentOrder = Array.isArray(choice) 
+        ? choice 
+        : (choice && typeof choice === 'object' && Array.isArray((choice as any).order) ? (choice as any).order : []);
       const correctOrder = getCorrectOrderingSequence(qi);
       const rawOptions = qi.options || [];
 
@@ -2166,53 +2250,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
 
                       <div className="space-y-2.5 pt-1">
                         {isMatchingQuestion(q) ? (
-                          <div className="space-y-4">
-                            <div className="bg-indigo-50 border border-indigo-100 p-3.5 rounded-2xl text-indigo-950 text-xs sm:text-sm font-semibold flex items-center gap-2">
-                              <span>🔗</span>
-                              <span>Hãy chọn ghép nối tương ứng cho mỗi khái niệm dưới đây:</span>
-                            </div>
-                            <div className="space-y-3">
-                              {(q.matchingPairs || []).map((pair, pIdx) => {
-                                const currentAnswers = activeExamSession.answers[idx] || {};
-                                const selectedRightVal = currentAnswers[pIdx] || '';
-                                return (
-                                  <div key={pIdx} className="p-4 bg-white border-2 border-slate-100 hover:border-slate-200 rounded-2xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 transition-all">
-                                    <div className="flex-1 flex items-start gap-3">
-                                      <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-700 flex items-center justify-center font-black text-xs shrink-0 mt-0.5">
-                                        {pIdx + 1}
-                                      </div>
-                                      <span className="text-xs sm:text-sm font-bold text-slate-800">{pair.left}</span>
-                                    </div>
-                                    <div className="text-slate-300 hidden md:block">➔</div>
-                                    <div className="flex-1">
-                                      <select
-                                        value={selectedRightVal}
-                                        onChange={(e) => {
-                                          const val = e.target.value;
-                                          setActiveExamSession(prev => {
-                                            if (!prev) return null;
-                                            const answers = { ...prev.answers };
-                                            const currentAns = answers[idx] && typeof answers[idx] === 'object' ? answers[idx] : {};
-                                            const updatedMatching = { ...currentAns, [pIdx]: val };
-                                            answers[idx] = updatedMatching;
-                                            return { ...prev, answers, currentQuestionIndex: idx };
-                                          });
-                                        }}
-                                        className="w-full px-3 py-2.5 bg-slate-50 hover:bg-slate-100 border-2 border-slate-200 focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 rounded-xl text-slate-800 text-xs sm:text-sm font-semibold focus:outline-none transition-all cursor-pointer"
-                                      >
-                                        <option value="" className="font-bold text-slate-400">-- Chọn đáp án ghép nối --</option>
-                                        {(q.matchingPairs || []).map((p, optIdx) => (
-                                          <option key={optIdx} value={p.right} className="font-semibold text-slate-700">
-                                            {p.right}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
+                          <MatchingQuestionRenderer q={q} idx={idx} activeExamSession={activeExamSession} setActiveExamSession={setActiveExamSession} />
                         ) : isMultipleResponseQuestion(q) && q.options && q.options.length > 0 ? (
                           <div className="space-y-3">
                             <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl text-indigo-950 text-xs font-semibold flex items-center gap-2">
@@ -2274,10 +2312,73 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                               <span>Hãy sắp xếp các thao tác / bước dưới đây theo đúng thứ tự (dùng nút ▲ / ▼):</span>
                             </div>
                             {(() => {
-                              const currentAnswers = activeExamSession.answers[idx];
-                              const currentOrder: string[] = Array.isArray(currentAnswers)
-                                ? currentAnswers
-                                : (q.options || []);
+                              const correctOrder = getCorrectOrderingSequence(q);
+                              const rawOptions = q.options && q.options.length > 0 ? q.options : correctOrder;
+                              const currentChoice = activeExamSession.answers[idx];
+
+                              let currentOrder: string[] = [];
+                              let source = '';
+
+                              if (!currentChoice) {
+                                currentOrder = shuffleOrdering(rawOptions, correctOrder);
+                                source = 'mới xáo (chưa có bài làm)';
+                                console.log(`[OrderingDebug] File StudentExamModule.tsx, dòng ~2315 - Câu ${idx + 1}:`, { original: correctOrder, shuffled: currentOrder, source });
+                                setTimeout(() => {
+                                  setActiveExamSession(prev => {
+                                    if (!prev) return null;
+                                    if (prev.answers[idx]) return prev;
+                                    return {
+                                      ...prev,
+                                      answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: false } }
+                                    };
+                                  });
+                                }, 0);
+                              } else if (typeof currentChoice === 'object' && currentChoice !== null && 'order' in currentChoice) {
+                                const savedObj = currentChoice as { order: string[]; interacted?: boolean };
+                                const isSavedSameAsCorrect = savedObj.order.every((val, i) => String(val).trim().toLowerCase() === String(correctOrder[i] || '').trim().toLowerCase());
+                                if (isSavedSameAsCorrect && !savedObj.interacted) {
+                                  currentOrder = shuffleOrdering(rawOptions, correctOrder);
+                                  source = 'xáo lại do dữ liệu cũ trùng đáp án chuẩn (chưa thao tác)';
+                                  console.log(`[OrderingDebug] File StudentExamModule.tsx, dòng ~2315 - Câu ${idx + 1}:`, { original: correctOrder, shuffled: currentOrder, source });
+                                  setTimeout(() => {
+                                    setActiveExamSession(prev => {
+                                      if (!prev) return null;
+                                      return {
+                                        ...prev,
+                                        answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: false } }
+                                      };
+                                    });
+                                  }, 0);
+                                } else {
+                                  currentOrder = savedObj.order;
+                                  source = savedObj.interacted ? 'khôi phục từ bài làm (đã thao tác)' : 'khôi phục từ bài làm';
+                                  console.log(`[OrderingDebug] File StudentExamModule.tsx, dòng ~2315 - Câu ${idx + 1}:`, { original: correctOrder, shuffled: currentOrder, source });
+                                }
+                              } else if (Array.isArray(currentChoice)) {
+                                const isSavedSameAsCorrect = currentChoice.every((val, i) => String(val).trim().toLowerCase() === String(correctOrder[i] || '').trim().toLowerCase());
+                                if (isSavedSameAsCorrect) {
+                                  currentOrder = shuffleOrdering(rawOptions, correctOrder);
+                                  source = 'xáo lại do mảng cũ trùng đáp án chuẩn (chưa thao tác)';
+                                  console.log(`[OrderingDebug] File StudentExamModule.tsx, dòng ~2315 - Câu ${idx + 1}:`, { original: correctOrder, shuffled: currentOrder, source });
+                                  setTimeout(() => {
+                                    setActiveExamSession(prev => {
+                                      if (!prev) return null;
+                                      return {
+                                        ...prev,
+                                        answers: { ...prev.answers, [idx]: { order: currentOrder, interacted: false } }
+                                      };
+                                    });
+                                  }, 0);
+                                } else {
+                                  currentOrder = currentChoice;
+                                  source = 'khôi phục từ mảng bài làm (đã thao tác)';
+                                  console.log(`[OrderingDebug] File StudentExamModule.tsx, dòng ~2315 - Câu ${idx + 1}:`, { original: correctOrder, shuffled: currentOrder, source });
+                                }
+                              } else {
+                                currentOrder = shuffleOrdering(rawOptions, correctOrder);
+                                source = 'mới xáo (fallback)';
+                                console.log(`[OrderingDebug] File StudentExamModule.tsx, dòng ~2315 - Câu ${idx + 1}:`, { original: correctOrder, shuffled: currentOrder, source });
+                              }
 
                               return (
                                 <div className="space-y-2.5">
@@ -2301,7 +2402,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                                             newOrder[oIdx - 1] = temp;
                                             setActiveExamSession(prev => {
                                               if (!prev) return null;
-                                              const answers = { ...prev.answers, [idx]: newOrder };
+                                              const answers = { ...prev.answers, [idx]: { order: newOrder, interacted: true } };
                                               return { ...prev, answers, currentQuestionIndex: idx };
                                             });
                                           }}
@@ -2321,7 +2422,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                                             newOrder[oIdx + 1] = temp;
                                             setActiveExamSession(prev => {
                                               if (!prev) return null;
-                                              const answers = { ...prev.answers, [idx]: newOrder };
+                                              const answers = { ...prev.answers, [idx]: { order: newOrder, interacted: true } };
                                               return { ...prev, answers, currentQuestionIndex: idx };
                                             });
                                           }}

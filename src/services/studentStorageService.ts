@@ -953,8 +953,27 @@ export async function fetchClassStatistics(
 
   try {
     const allRosters = await fetchAllStudentsFromFirestore();
+    const gradeTotals: Record<string, { total: number; male: number; female: number }> = {
+      'Khối 1': { total: 0, male: 0, female: 0 },
+      'Khối 2': { total: 0, male: 0, female: 0 },
+      'Khối 3': { total: 0, male: 0, female: 0 },
+      'Khối 4': { total: 0, male: 0, female: 0 },
+      'Khối 5': { total: 0, male: 0, female: 0 },
+      '1': { total: 0, male: 0, female: 0 },
+      '2': { total: 0, male: 0, female: 0 },
+      '3': { total: 0, male: 0, female: 0 },
+      '4': { total: 0, male: 0, female: 0 },
+      '5': { total: 0, male: 0, female: 0 },
+    };
+
+    const processedClasses = new Set<string>();
+
     Object.entries(allRosters).forEach(([cName, list]) => {
       if (!Array.isArray(list)) return;
+      const stdName = getStandardClassName(cName);
+      if (processedClasses.has(stdName)) return;
+      processedClasses.add(stdName);
+
       let male = 0;
       let female = 0;
       list.forEach((s) => {
@@ -962,13 +981,34 @@ export async function fetchClassStatistics(
         if (g === 'nam' || g === 'male' || g === 'm') male++;
         else if (g === 'nữ' || g === 'nu' || g === 'female' || g === 'f') female++;
       });
-      const stdName = getStandardClassName(cName);
       const upperKey = normalizeClassKey(cName);
       const itemStats = { total: list.length, male, female };
+
       statsMap[stdName] = itemStats;
       statsMap[upperKey] = itemStats;
       statsMap[cName] = itemStats;
+
+      const gradeNum = stdName.replace(/[^0-9]/g, '');
+      if (gradeNum && gradeTotals[`Khối ${gradeNum}`]) {
+        gradeTotals[`Khối ${gradeNum}`].total += list.length;
+        gradeTotals[`Khối ${gradeNum}`].male += male;
+        gradeTotals[`Khối ${gradeNum}`].female += female;
+
+        gradeTotals[gradeNum].total += list.length;
+        gradeTotals[gradeNum].male += male;
+        gradeTotals[gradeNum].female += female;
+      }
     });
+
+    Object.assign(statsMap, gradeTotals);
+
+    if (gradeInput) {
+      const gNum = gradeInput.replace(/[^0-9]/g, '');
+      const gName = `Khối ${gNum}`;
+      if (statsMap[gName]) {
+        statsMap[gradeInput] = statsMap[gName];
+      }
+    }
   } catch (err) {
     console.warn('Lỗi khi fetchClassStatistics:', err);
   }
