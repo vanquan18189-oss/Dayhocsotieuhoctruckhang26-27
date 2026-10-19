@@ -2965,17 +2965,6 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
     return {};
   }, [selectedSemester2, exams, assignments, lessons, games, classes, selectedSubject1]);
 
-  // Year End Confirmation Modal State & Functions
-  const [isYearEndModalOpen, setIsYearEndModalOpen] = useState<boolean>(false);
-  const [selectedYearEndStudent, setSelectedYearEndStudent] = useState<any | null>(null);
-  const [modalYearEndStatus, setModalYearEndStatus] = useState<YearEndPromotionStatus>('promoted');
-  const [modalYearEndNote, setModalYearEndNote] = useState<string>('');
-  const [modalAutoRating, setModalAutoRating] = useState<string>('');
-
-  const getStudentSddcn = useCallback((st: any): string => {
-    return st.sddcn || st._rawSt?.sddcn || st._rawSt?.studentPersistentId || st.id || '';
-  }, []);
-
   const isCuoiKi2 = useMemo(() => {
     const sem = (selectedSemester2 || '').toLowerCase();
     return sem.includes('cuối k') && sem.includes('2');
@@ -2990,33 +2979,6 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
     const evalMap = getStudentEvaluationsForSemester2(st, (st as any)._rawSt || st);
     return computeYearResult(st, currentGradeSubjects2, evalMap, selectedGrade2, selectedSemester2);
   }, [getStudentEvaluationsForSemester2, currentGradeSubjects2, selectedGrade2, selectedSemester2]);
-
-  const handleOpenYearEndModal = useCallback((st: any, proposal: any) => {
-    setSelectedYearEndStudent(st);
-    setModalYearEndStatus(proposal.status);
-    setModalYearEndNote(proposal.note || '');
-    setModalAutoRating(proposal.autoRating || '');
-    setIsYearEndModalOpen(true);
-  }, []);
-
-  const handleSaveYearEndConfirmation = useCallback(() => {
-    if (!selectedYearEndStudent) return;
-    const sddcn = getStudentSddcn(selectedYearEndStudent);
-    saveYearEndResult({
-      sddcn,
-      academicYear: selectedAcademicYear,
-      status: modalYearEndStatus,
-      note: modalYearEndNote.trim(),
-      autoRating: modalAutoRating,
-      isManualConfirmed: true,
-      updatedBy: 'Giáo viên'
-    });
-
-    const studentName = `${selectedYearEndStudent.lastName} ${selectedYearEndStudent.firstName}`.trim();
-    const statusLabel = modalYearEndStatus === 'promoted' ? 'Lên lớp' : modalYearEndStatus === 'review_needed' ? 'Cần xem xét' : 'Ở lại lớp';
-    showToast(`✅ Đã xác nhận kết quả cuối năm (${statusLabel}) cho học sinh ${studentName}!`);
-    setIsYearEndModalOpen(false);
-  }, [selectedYearEndStudent, getStudentSddcn, selectedAcademicYear, modalYearEndStatus, modalYearEndNote, modalAutoRating]);
 
   const handleExportExcelSection2 = useCallback(() => {
     if (filteredStudents2.length === 0) {
@@ -3628,42 +3590,37 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                         {showYearResult && (
                           <td className="p-2 border-l border-slate-300 sticky right-0 bg-white group-hover:bg-slate-50 transition-colors z-10 text-center shadow-2xs">
                             {(() => {
-                              const proposal = getStudentYearEndProposal(st);
-                              return (
-                                <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                  {proposal.status === 'promoted' && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs">
-                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                      Lên lớp
-                                    </span>
-                                  )}
-                                  {proposal.status === 'review_needed' && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300 shadow-2xs">
-                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                                      Cần xem xét
-                                    </span>
-                                  )}
-                                  {proposal.status === 'retained' && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs">
-                                      🛑 Ở lại lớp
-                                    </span>
-                                  )}
-
-                                  <button
-                                    type="button"
-                                    onClick={() => handleOpenYearEndModal(st, proposal)}
-                                    className={`px-2 py-0.5 rounded-md text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1 border ${
-                                      proposal.isManualConfirmed
-                                        ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300'
-                                        : 'bg-teal-600 hover:bg-teal-700 text-white border-teal-600 shadow-2xs'
-                                    }`}
-                                    title={proposal.isManualConfirmed ? "Sửa xác nhận kết quả" : "Thao tác xác nhận trạng thái cuối năm"}
-                                  >
-                                    {proposal.isManualConfirmed ? <Edit3 className="w-3 h-3" /> : <UserCheck className="w-3 h-3" />}
-                                    <span>{proposal.isManualConfirmed ? 'Đã duyệt' : 'Xác nhận'}</span>
-                                  </button>
-                                </div>
-                              );
+                              try {
+                                const res = getStudentYearResult(st) || { status: 'incomplete', label: 'Chưa đủ dữ liệu', reasons: [] };
+                                const reasonsText = res.reasons && res.reasons.length > 0 ? res.reasons.join(', ') : '';
+                                return (
+                                  <div className="flex items-center justify-center gap-1.5 flex-wrap" title={reasonsText}>
+                                    {res.status === 'promoted' && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                        Lên lớp
+                                      </span>
+                                    )}
+                                    {res.status === 'not_eligible' && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs" title={reasonsText}>
+                                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                        Chưa đủ điều kiện lên lớp
+                                      </span>
+                                    )}
+                                    {res.status === 'incomplete' && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-slate-100 text-slate-600 border border-slate-300 shadow-2xs" title={reasonsText}>
+                                        - Chưa đủ dữ liệu
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              } catch (err) {
+                                return (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-extrabold bg-slate-100 text-slate-500 border border-slate-300">
+                                    - Chưa đủ dữ liệu
+                                  </span>
+                                );
+                              }
                             })()}
                           </td>
                         )}
@@ -3924,126 +3881,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
         </div>
       )}
 
-      {/* Year End Confirmation Modal */}
-      {isYearEndModalOpen && selectedYearEndStudent && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center font-bold">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-slate-900 font-heading">
-                    Xác Nhận Kết Quả Cuối Năm
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    Học sinh: <strong className="text-teal-800 font-extrabold">{selectedYearEndStudent.lastName} {selectedYearEndStudent.firstName}</strong> ({selectedYearEndStudent.className})
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsYearEndModalOpen(false)}
-                className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-xs cursor-pointer"
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="space-y-4 text-xs">
-              {/* Auto rating recommendation info */}
-              <div className="p-3 bg-indigo-50/80 border border-indigo-200 rounded-2xl text-indigo-900 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold">
-                  <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" />
-                  <span>Đề xuất tự động từ hệ thống:</span>
-                </div>
-                <div className="text-[11px] font-medium text-indigo-800">
-                  Xếp loại tổng thể: <strong className="font-extrabold text-indigo-950">{modalAutoRating || 'Hoàn thành'}</strong>
-                </div>
-              </div>
-
-              {/* Status Selector */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-2">
-                  Chọn trạng thái kết quả cuối năm:
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setModalYearEndStatus('promoted')}
-                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer font-bold flex flex-col items-center gap-1 ${
-                      modalYearEndStatus === 'promoted'
-                        ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="text-sm">✅</span>
-                    <span className="text-[11px]">Lên lớp</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setModalYearEndStatus('review_needed')}
-                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer font-bold flex flex-col items-center gap-1 ${
-                      modalYearEndStatus === 'review_needed'
-                        ? 'bg-amber-500 text-white border-amber-500 shadow-sm'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="text-sm">⚠️</span>
-                    <span className="text-[11px]">Cần xem xét</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setModalYearEndStatus('retained')}
-                    className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer font-bold flex flex-col items-center gap-1 ${
-                      modalYearEndStatus === 'retained'
-                        ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    <span className="text-sm">🛑</span>
-                    <span className="text-[11px]">Ở lại lớp</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Optional Notes */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Ghi chú / Lý do (không bắt buộc):
-                </label>
-                <textarea
-                  rows={3}
-                  value={modalYearEndNote}
-                  onChange={(e) => setModalYearEndNote(e.target.value)}
-                  placeholder="Nhập ghi chú lý do nếu quyết định khác với đề xuất tự động..."
-                  className="w-full p-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-800 bg-white focus:ring-2 focus:ring-teal-500 focus:outline-hidden"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setIsYearEndModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
-              >
-                Hủy
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveYearEndConfirmation}
-                className="px-5 py-2 rounded-xl text-xs font-black bg-teal-600 hover:bg-teal-700 text-white shadow-md shadow-teal-200 transition-all cursor-pointer"
-              >
-                Lưu Xác Nhận
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {toast && (
         <div className={`fixed bottom-6 right-6 z-[100] text-white px-5 py-3.5 rounded-2xl shadow-2xl border flex items-center gap-3 animate-slide-up backdrop-blur-md ${toast.type === 'error' ? 'bg-rose-600 border-rose-400 text-white' : 'bg-emerald-600 border-emerald-400 text-white'}`}>
