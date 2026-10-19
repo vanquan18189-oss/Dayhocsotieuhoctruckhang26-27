@@ -8,7 +8,7 @@ export const CLASSES_BY_GRADE: Record<string, string[]> = {
   "Khối 5": []
 };
 export const ALL_CLASSES: string[] = [];
-export const EXAM_TYPES = ["Thường xuyên", "Giữa kì 1", "Cuối kì 1", "Giữa kì 2", "Cuối kì 2"];
+export const EXAM_TYPES = ["Giữa kì 1", "Cuối kì 1", "Giữa kì 2", "Cuối kì 2"];
 
 export function extractGradeDigit(str?: string | number): string {
   if (str === undefined || str === null) return '';

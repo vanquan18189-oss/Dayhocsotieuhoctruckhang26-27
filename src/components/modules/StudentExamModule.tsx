@@ -3098,7 +3098,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                             {ex.grade || 'Khối 3'}
                           </span>
                           <span className="bg-purple-50 text-purple-700 text-[11px] font-extrabold px-2.5 py-1 rounded-full border border-purple-100">
-                            {ex.examType || 'Thường xuyên'}
+                            {ex.examType || 'Giữa kì 1'}
                           </span>
                         </div>
 

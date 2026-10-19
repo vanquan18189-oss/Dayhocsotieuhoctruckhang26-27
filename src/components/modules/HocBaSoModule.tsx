@@ -59,7 +59,7 @@ import {
 import { UserRole, StudentRecord as GlobalStudentRecord, ExamPaper, HomeworkAssignment, Lesson5EPlan, GameItem } from '../../types';
 import { PRIMARY_SCHOOL_SUBJECTS } from '../../services/mockData';
 import { GRADES, CLASSES_BY_GRADE, EXAM_TYPES } from '../../lib/constants';
-import { useClassesList, getSubjectsForClassOrGrade, getSubjectColorStyles, extractGradeDigit } from '../../services/classStorageService';
+import { useClassesList, useClassOptions, getSubjectsForClassOrGrade, getSubjectColorStyles, extractGradeDigit } from '../../services/classStorageService';
 import { isSubjectMatch, getCurrentStudentSession, getEffectiveStudentClassAndGrade } from '../../services/studentSessionService';
 import {
   calculateUnifiedHocBaData,
@@ -75,7 +75,8 @@ import {
   getSubjectShortName,
   formatScore,
   formatTotalScore,
-  formatSubmissionDateTime
+  formatSubmissionDateTime,
+  shouldShowScoreColumn
 } from '../../services/hocBaDataService';
 import {
   getAllStudentsFromLocalStorage,
@@ -184,7 +185,6 @@ const MONTH_FILTER_OPTIONS = [
 
 const EXAM_FILTER_OPTIONS = [
   { key: 'all', label: 'Tất cả bài kiểm tra' },
-  { key: 'thuong_xuyen', label: 'Thường xuyên' },
   { key: 'giua_ki_1', label: 'Giữa kì 1' },
   { key: 'cuoi_ki_1', label: 'Cuối kì 1' },
   { key: 'giua_ki_2', label: 'Giữa kì 2' },
@@ -195,8 +195,7 @@ const BAR_FILTER_CHIPS = [
   { key: 'giua_ki_1', label: 'Giữa kỳ 1' },
   { key: 'cuoi_ki_1', label: 'Cuối kỳ 1' },
   { key: 'giua_ki_2', label: 'Giữa kỳ 2' },
-  { key: 'cuoi_ki_2', label: 'Cuối kỳ 2' },
-  { key: 'thuong_xuyen', label: 'Thường xuyên' }
+  { key: 'cuoi_ki_2', label: 'Cuối kỳ 2' }
 ];
 
 const BAR_MONTH_OPTIONS = [
@@ -2526,6 +2525,13 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
   games = [],
   currentStudent = null
 }) => {
+  const getSuggestedDat = (scoreVal: any): 'T' | 'H' | 'CHT' => {
+    const num = typeof scoreVal === 'number' ? scoreVal : parseFloat(scoreVal);
+    if (isNaN(num)) return 'H';
+    if (num >= 8.5) return 'T';
+    if (num >= 5.0) return 'H';
+    return 'CHT';
+  };
   const [isLocked, setIsLocked] = useState<boolean>(true);
   const [isCollapsed1, setIsCollapsed1] = useState<boolean>(false);
   const [isCollapsed2, setIsCollapsed2] = useState<boolean>(false);
@@ -2572,34 +2578,24 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
     setTimeout(() => setToast(null), 3500);
   };
   
+  const { classes: classList1Options, hasNoClassesInGrade: hasNoClasses1 } = useClassOptions(selectedGrade1);
+  const { classes: classList2Options, hasNoClassesInGrade: hasNoClasses2 } = useClassOptions(selectedGrade2);
+
   const classesList1 = useMemo(() => {
-    const list = getClassesForGrade(selectedGrade1).map(c => c.name);
-    return [...Array.from(new Set(list)), 'Tất cả Lớp'];
-  }, [selectedGrade1, classes]);
+    return ['Tất cả Lớp', ...classList1Options.map(c => c.name)];
+  }, [classList1Options]);
 
   const classesList2 = useMemo(() => {
-    const list = getClassesForGrade(selectedGrade2).map(c => c.name);
-    return [...Array.from(new Set(list)), 'Tất cả Lớp'];
-  }, [selectedGrade2, classes]);
+    return ['Tất cả Lớp', ...classList2Options.map(c => c.name)];
+  }, [classList2Options]);
 
-  // Tự động chọn lớp đầu tiên của khối khi đổi khối học ở Section 1
+  // Khi đổi khối: tự đặt lại lớp về "Tất cả Lớp"
   useEffect(() => {
-    const available = getClassesForGrade(selectedGrade1);
-    if (available && available.length > 0) {
-      setSelectedClass1(available[0].name);
-    } else {
-      setSelectedClass1('Tất cả Lớp');
-    }
+    setSelectedClass1('Tất cả Lớp');
   }, [selectedGrade1]);
 
-  // Tự động chọn lớp đầu tiên của khối khi đổi khối học ở Section 2
   useEffect(() => {
-    const available = getClassesForGrade(selectedGrade2);
-    if (available && available.length > 0) {
-      setSelectedClass2(available[0].name);
-    } else {
-      setSelectedClass2('Tất cả Lớp');
-    }
+    setSelectedClass2('Tất cả Lớp');
   }, [selectedGrade2]);
 
   // Tự động đồng bộ Học kỳ từ Header toàn cục xuống Sổ Nhận Xét và Sổ Tổng Kết
@@ -2622,8 +2618,8 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
   const currentGradeSubjects2 = getSubjectsForGrade(selectedGrade2);
   const subjectsList = PRIMARY_SCHOOL_SUBJECTS;
   const examTypesList1 = isHk2
-    ? ['Giữa kì 2', 'Cuối kì 2', 'Thường xuyên', 'Giữa kì 1', 'Cuối kì 1']
-    : ['Giữa kì 1', 'Cuối kì 1', 'Thường xuyên', 'Giữa kì 2', 'Cuối kì 2'];
+    ? ['Giữa kì 2', 'Cuối kì 2', 'Giữa kì 1', 'Cuối kì 1']
+    : ['Giữa kì 1', 'Cuối kì 1', 'Giữa kì 2', 'Cuối kì 2'];
   const testNamesList = ['Tất cả bài kiểm tra', 'Kiểm tra 15 phút', 'Kiểm tra miệng', 'Bài thực hành định kì', 'Kiểm tra học kì'];
   const semestersList = isHk2
     ? ['Giữa kì 2', 'Cuối kì 2', 'Giữa kì 1', 'Cuối kì 1']
@@ -2748,17 +2744,6 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
             // 2. Check if there are real online exam submissions for this exam type
             const hasRealDataForExamType = summary.hasData && summary.subjects.some(s => s.hasRealData && s.score !== null);
 
-            const rawComment = (rawSt as any).commentDetail;
-            const rawEvals = (rawSt as any).evaluations;
-
-            // 3. Fallback for default benchmark term "Giữa kì 1":
-            // If selecting "Giữa kì 1" and the student record in roster already has commentDetail or evaluations,
-            // keep that default benchmark evaluation data!
-            const isDefaultTermAndHasRosterData =
-              normSelectedExam === 'giua_ki_1' &&
-              ((rawComment && rawComment.hasCommented) ||
-               (rawEvals && Object.keys(rawEvals).length > 0));
-
             if (manualCommentForExam) {
               st.commentDetail = manualCommentForExam;
               if (!st.evaluations) st.evaluations = {};
@@ -2781,11 +2766,12 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                              || summary.subjects.find(s => s.hasRealData && s.score !== null);
 
               if (targetSub && targetSub.score !== null) {
+                const hasWeakTopic = targetSub.score < 8 && targetSub.note && targetSub.note.length > 0 && !targetSub.note.includes('Gộp thực tế');
                 st.commentDetail = {
                   correctCount: Math.round((targetSub.score / 10) * 10),
                   totalQuestions: 10,
-                  strengths: targetSub.note,
-                  reminders: targetSub.score >= 8 ? `Đã hoàn thành xuất sắc bài kiểm tra ${selectedExamType1}.` : 'Cần chú ý ôn tập thêm nội dung bài học.',
+                  strengths: targetSub.subject || 'Nội dung học tập',
+                  reminders: hasWeakTopic ? targetSub.note : '',
                   overallDat: targetSub.status,
                   score: targetSub.score,
                   hasCommented: true
@@ -2793,12 +2779,8 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
               } else {
                 st.commentDetail = undefined;
               }
-            } else if (isDefaultTermAndHasRosterData) {
-              if (rawEvals) st.evaluations = { ...rawEvals };
-              if (rawComment && rawComment.hasCommented) {
-                st.commentDetail = { ...rawComment };
-              }
             } else {
+              // No data for this specific assessment period -> leave blank and show "Chưa có nhận xét cho đợt kiểm tra này"
               st.evaluations = {};
               st.commentDetail = undefined;
             }
@@ -3325,7 +3307,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                     <th className="p-3 border-r border-slate-200 min-w-[100px]">Ngày sinh</th>
                     <th className="p-3 border-r border-slate-200 text-left min-w-[380px]">Lời nhận xét</th>
                     <th className="p-3 border-r border-slate-200 w-16">Đạt</th>
-                    {isSubjectWithScore(selectedSubject1) && (
+                    {shouldShowScoreColumn(selectedGrade1, selectedSubject1, selectedExamType1) && (
                       <th className="p-3 border-r border-slate-200 w-16">Điểm</th>
                     )}
                     <th className="p-3 w-28">Thao tác</th>
@@ -3334,7 +3316,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                 <tbody className="divide-y divide-slate-200">
                   {filteredStudents1.length === 0 ? (
                     <tr>
-                      <td colSpan={isSubjectWithScore(selectedSubject1) ? 7 : 6} className="text-center py-12 text-slate-400 text-xs">
+                      <td colSpan={shouldShowScoreColumn(selectedGrade1, selectedSubject1, selectedExamType1) ? 7 : 6} className="text-center py-12 text-slate-400 text-xs">
                         <div className="flex flex-col items-center justify-center space-y-2">
                           <AlertCircle className="w-8 h-8 text-slate-300" />
                           <span>Không tìm thấy học sinh nào phù hợp.</span>
@@ -3398,11 +3380,15 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                               }`}>
                                 {displayDat}
                               </span>
+                            ) : displayScore !== '' ? (
+                              <span className="inline-block px-2 py-0.5 rounded-lg font-semibold text-[11px] bg-amber-50 text-amber-800 border border-amber-200/80 cursor-pointer" title="Giá trị gợi ý từ dữ liệu. Bấm để xác nhận hoặc sửa." onClick={() => handleViewDetail(st)}>
+                                (Gợi ý: {getSuggestedDat(displayScore)})
+                              </span>
                             ) : (
                               <span className="text-slate-300 font-bold text-xs">-</span>
                             )}
                           </td>
-                          {isSubjectWithScore(selectedSubject1) && (
+                          {shouldShowScoreColumn(selectedGrade1, selectedSubject1, selectedExamType1) && (
                             <td className="p-3 text-center border-r border-slate-200 font-mono text-slate-800 font-extrabold">
                               {displayScore !== '' ? displayScore : <span className="text-slate-300 font-normal">-</span>}
                             </td>
@@ -3552,12 +3538,12 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                     <th className="p-3 border-r border-slate-200 min-w-[90px]" rowSpan={2}>Ngày sinh</th>
                     <th className="p-3 border-r border-slate-200 w-14" rowSpan={2}>Nữ</th>
                     {currentGradeSubjects2.map((subj) => {
-                      const hasScore = isSubjectWithScore(subj);
+                      const showScore = shouldShowScoreColumn(selectedGrade2, subj, selectedSemester2);
                       return (
                         <th
                           key={subj}
-                          className={`p-2 border-r border-slate-200 ${hasScore ? 'min-w-[95px]' : 'min-w-[60px]'}`}
-                          colSpan={hasScore ? 2 : 1}
+                          className={`p-2 border-r border-slate-200 ${showScore ? 'min-w-[95px]' : 'min-w-[60px]'}`}
+                          colSpan={showScore ? 2 : 1}
                         >
                           {subj}
                         </th>
@@ -3572,11 +3558,11 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                   </tr>
                   <tr className="bg-slate-50 text-slate-600 text-[11px] font-bold border-b border-slate-200 text-center">
                     {currentGradeSubjects2.map((subj) => {
-                      const hasScore = isSubjectWithScore(subj);
+                      const showScore = shouldShowScoreColumn(selectedGrade2, subj, selectedSemester2);
                       return (
                         <React.Fragment key={`${subj}-sub`}>
                           <th className="p-1.5 border-r border-slate-200 w-12">Đạt</th>
-                          {hasScore && (
+                          {showScore && (
                             <th className="p-1.5 border-r border-slate-200 w-12">Điểm</th>
                           )}
                         </React.Fragment>
@@ -3588,7 +3574,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                   {filteredStudents2.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={(selectedClass2 === 'Tất cả Lớp' ? 7 : 5) + currentGradeSubjects2.reduce((acc, subj) => acc + (isSubjectWithScore(subj) ? 2 : 1), 0) + 1}
+                        colSpan={(selectedClass2 === 'Tất cả Lớp' ? 7 : 5) + currentGradeSubjects2.reduce((acc, subj) => acc + (shouldShowScoreColumn(selectedGrade2, subj, selectedSemester2) ? 2 : 1), 0) + 1}
                         className="text-center py-12 text-slate-400 text-xs"
                       >
                         <div className="flex flex-col items-center justify-center space-y-2">
@@ -3621,7 +3607,7 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                           const evalMap = getStudentEvaluationsForSemester2(st, (st as any)._rawSt || st);
                           return currentGradeSubjects2.map((subj) => {
                             const evalData = evalMap ? evalMap[subj] : undefined;
-                            const hasScore = isSubjectWithScore(subj);
+                            const showScore = shouldShowScoreColumn(selectedGrade2, subj, selectedSemester2);
                             return (
                               <React.Fragment key={subj}>
                                 <td className="p-1.5 text-center border-r border-slate-200">
@@ -3632,11 +3618,15 @@ export const HocBaSoModule: React.FC<HocBaSoModuleProps> = memo(({
                                     }`}>
                                       {evalData.dat}
                                     </span>
+                                  ) : evalData && evalData.score ? (
+                                    <span className="inline-block px-1 py-0.5 rounded font-semibold text-[10px] bg-amber-50 text-amber-800 border border-amber-200" title="Mức gợi ý">
+                                      (Gợi ý: {getSuggestedDat(evalData.score)})
+                                    </span>
                                   ) : (
                                     <span className="text-slate-300 font-bold text-[11px]">-</span>
                                   )}
                                 </td>
-                                {hasScore && (
+                                {showScore && (
                                   <td className="p-1.5 text-center border-r border-slate-200 font-mono text-slate-700 font-semibold">
                                     {evalData && evalData.score ? evalData.score : <span className="text-slate-300 font-normal">-</span>}
                                   </td>

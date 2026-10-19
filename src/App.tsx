@@ -799,7 +799,7 @@ export function App() {
                         createdAt: new Date().toISOString(),
                         status: 'published',
                         targetClass: examData.targetClasses.join(', '),
-                        examType: 'Thường xuyên',
+                        examType: 'Giữa kì 1',
                         submissionsCount: 0,
                         totalStudents: 35
                       };

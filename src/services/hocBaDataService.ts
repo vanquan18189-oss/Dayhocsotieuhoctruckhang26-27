@@ -1,5 +1,5 @@
 import { ExamPaper, HomeworkAssignment, Lesson5EPlan, GameItem, StudentRecord } from '../types';
-import { getSubjectsForClassOrGrade, SchoolClassItem } from './classStorageService';
+import { getSubjectsForClassOrGrade, SchoolClassItem, extractGradeDigit } from './classStorageService';
 import { getStudentAssignedSubjects, isSubjectMatch } from './studentSessionService';
 import { getCurrentActiveAcademicYear, getStudentClassInfo } from './studentStorageService';
 import { formatScore, roundTotalScore, formatTotalScore, getCurrentSubmissionTimestamp, formatSubmissionDateTime } from '../utils/scoreUtils';
@@ -172,7 +172,7 @@ export function isSubjectWithScore(subjectName: string): boolean {
  * Chuẩn hóa mã đợt kiểm tra để so khớp 100% không phụ thuộc khoảng trắng hay viết hoa/thường
  */
 export function normalizeExamTypeKey(str: string): string {
-  if (!str) return 'giua_ki_1';
+  if (!str) return 'chua_xac_dinh';
   const clean = str.toLowerCase().trim().replace(/\s+/g, ' ');
   if (
     clean.includes('giữa k 1') ||
@@ -217,11 +217,12 @@ export function normalizeExamTypeKey(str: string): string {
   if (clean.includes('thuong_xuyen') || clean.includes('thường xuyên') || clean === 'tx') {
     return 'thuong_xuyen';
   }
+  if (clean.includes('chưa xác định') || clean.includes('chua_xac_dinh')) return 'chua_xac_dinh';
   if (clean.includes('giữa') && (clean.includes('1') || clean.includes('i'))) return 'giua_ki_1';
   if (clean.includes('cuối') && (clean.includes('1') || clean.includes('i'))) return 'cuoi_ki_1';
   if (clean.includes('giữa') && (clean.includes('2') || clean.includes('ii'))) return 'giua_ki_2';
   if (clean.includes('cuối') && (clean.includes('2') || clean.includes('ii'))) return 'cuoi_ki_2';
-  return 'giua_ki_1';
+  return 'chua_xac_dinh';
 }
 
 export function isExamTypeMatch(exType: string, exTitle: string, targetFilter: string): boolean {
@@ -229,6 +230,10 @@ export function isExamTypeMatch(exType: string, exTitle: string, targetFilter: s
   const normTarget = normalizeExamTypeKey(targetFilter);
   const normType = normalizeExamTypeKey(exType);
   const normTitle = normalizeExamTypeKey(exTitle);
+
+  if (normTarget === 'chua_xac_dinh') {
+    return normType === 'chua_xac_dinh' && normTitle === 'chua_xac_dinh';
+  }
 
   if (normType === normTarget) return true;
   if (normTitle === normTarget) return true;
@@ -638,7 +643,7 @@ export function getStudentExamSubmissions(
     }
 
     const examObj = exams.find(e => e.id === exId) || sub.exam || exFallback;
-    const examType = examObj?.examType || sub.examType || 'Thường xuyên';
+    const examType = examObj?.examType || sub.examType || 'Giữa kì 1';
 
     results.push({
       examId: exId,
@@ -1525,3 +1530,47 @@ export function calculateOverallClassification(
     remarkSubjects
   };
 }
+
+/**
+ * Quyết định theo (khối, môn, đợt) có hiển thị cột điểm hay không:
+ * - Giữa kì 1 và Giữa kì 2: ẩn cột “Điểm”, chỉ có cột “Đạt” (T, H, CHT) và nhận xét. Ngoại lệ: khối 4 và 5, môn Toán và Tiếng Việt có điểm vì có bài kiểm tra định kỳ giữa kì.
+ * - Cuối kì 1 và Cuối kì 2: có cột điểm với các môn có bài kiểm tra định kỳ (Toán, Tiếng Việt, Ngoại ngữ 1, Lịch sử và Địa lí, Khoa học, Tin học, Công nghệ).
+ * - Thường xuyên: mặc định ẩn điểm, chỉ nhận xét và mức.
+ */
+export function shouldShowScoreColumn(grade: string, subject: string, assessmentType: string): boolean {
+  const gNum = extractGradeDigit(grade);
+  const normType = normalizeExamTypeKey(assessmentType);
+  const normSub = normalizeSubjectName(subject).toLowerCase();
+
+  if (normType === 'thuong_xuyen' || normType === 'chua_xac_dinh') {
+    return false;
+  }
+
+  if (normType === 'giua_ki_1' || normType === 'giua_ki_2') {
+    if ((gNum === '4' || gNum === '5') && (normSub.includes('toán') || normSub.includes('tiếng việt'))) {
+      return true;
+    }
+    return false;
+  }
+
+  if (normType === 'cuoi_ki_1' || normType === 'cuoi_ki_2') {
+    if (
+      normSub.includes('toán') ||
+      normSub.includes('tiếng việt') ||
+      normSub.includes('ngoại ngữ') ||
+      normSub.includes('tiếng anh') ||
+      normSub.includes('lịch sử') ||
+      normSub.includes('địa lí') ||
+      normSub.includes('địa lý') ||
+      normSub.includes('khoa học') ||
+      normSub.includes('tin học') ||
+      normSub.includes('công nghệ')
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  return false;
+}
+

@@ -1151,8 +1151,8 @@ export function exportSoNhanXetToExcel(params: {
     const nameWithGender = `${fullName}${genderTag}`;
 
     const commentText = hasComment && comment
-      ? `Khen ngợi em đã hoàn thành đúng ${comment.correctCount}/${comment.totalQuestions} câu. Làm tốt các câu: ${comment.strengths}. Cần ôn tập kỹ hơn ở ${comment.reminders}`
-      : 'Chưa có nhận xét';
+      ? `Khen ngợi em đã hoàn thành đúng ${comment.correctCount}/${comment.totalQuestions} câu. Làm tốt các câu: ${comment.strengths}.${comment.reminders && (comment.score === undefined || comment.score < 8) ? ` Cần ôn tập kỹ hơn ở ${comment.reminders}` : ''}`
+      : 'Chưa có nhận xét cho đợt kiểm tra này';
 
     const row = [
       idx + 1,

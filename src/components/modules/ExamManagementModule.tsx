@@ -220,7 +220,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
           subject: examData.subject || 'Toán',
           grade: examData.grade || 'Khối 3',
           durationMinutes: Number(examData.durationMinutes) || 45,
-          examType: examData.examType || 'Thường xuyên',
+          examType: examData.examType || 'Giữa kì 1',
           targetClass: cls,
           matrix: {
             nhanBiet: nhanBietCount,
@@ -280,7 +280,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       subject: meta?.subject || questions[0]?.subject || 'Toán',
       grade: meta?.grade || questions[0]?.grade || 'Khối 3',
       durationMinutes: Number(meta?.durationMinutes) || 45,
-      examType: meta?.examType || 'Thường xuyên',
+      examType: meta?.examType || 'Giữa kì 1',
       matrix: { nhanBiet: nhanBietCount, thongHieu: thongHieuCount, vanDung: vanDungCount, vanDungCao: vanDungCaoCount },
       questions: questions,
       teacherId: activeTeacherProfile.id,
@@ -396,7 +396,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   const [isAssignmentModalOpen, setIsAssignmentModalOpen] = useState(false);
   const [assignmentExam, setAssignmentExam] = useState<ExamPaper | null>(null);
   const [assignmentTab, setAssignmentTab] = useState<'select_class' | 'settings'>('select_class');
-  const [assignmentType, setAssignmentType] = useState('Thường xuyên');
+  const [assignmentType, setAssignmentType] = useState('Giữa kì 1');
   const [assignmentClasses, setAssignmentClasses] = useState<string[]>([]);
   const [assignmentDuration, setAssignmentDuration] = useState(15);
   const [assignmentTitle, setAssignmentTitle] = useState('');
@@ -514,7 +514,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         title: assignmentTitle.trim() || assignmentExam.title,
         grade: normalizedGrade,
         durationMinutes: Number(assignmentDuration) || assignmentExam.durationMinutes || 45,
-        examType: assignmentType || assignmentExam.examType || 'Thường xuyên',
+        examType: assignmentType || assignmentExam.examType || 'Giữa kì 1',
         targetClass: uniqueClasses.join(', '),
         targetClasses: uniqueClasses,
         status: 'published',
@@ -1084,7 +1084,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   const [deleteStudent, setDeleteStudent] = useState<{id: string, name: string} | null>(null);
   const [editingExam, setEditingExam] = useState<ExamPaper | null>(null);
   const [editTitle, setEditTitle] = useState('');
-  const [editExamType, setEditExamType] = useState('Thường xuyên');
+  const [editExamType, setEditExamType] = useState('Giữa kì 1');
   const [editDurationMinutes, setEditDurationMinutes] = useState(45);
   const [editTargetClass, setEditTargetClass] = useState('');
   const [editSubject, setEditSubject] = useState('');
@@ -1119,7 +1119,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   useEffect(() => {
     if (editingExam) {
       setEditTitle(editingExam.title || '');
-      setEditExamType(editingExam.examType || (editingExam as any).testType || (editingExam as any).type || 'Thường xuyên');
+      setEditExamType(editingExam.examType || (editingExam as any).testType || (editingExam as any).type || 'Giữa kì 1');
       setEditDurationMinutes(editingExam.durationMinutes || (editingExam as any).duration || 45);
       setEditTargetClass(editingExam.targetClass || 'Tất cả các lớp');
       setEditSubject(editingExam.subject || 'Toán');
@@ -1787,7 +1787,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
                   {/* Header of paper */}
                   <div className="text-center mb-8">
                     <h3 className="text-sm font-bold text-indigo-600 mb-2 uppercase tracking-widest">HỆ THỐNG DẠY VÀ HỌC SỐ PK TRỰC KHANG</h3>
-                    <h1 className="text-2xl font-black text-slate-800 uppercase mb-3">Đề kiểm tra {editExamType || 'thường xuyên'}</h1>
+                    <h1 className="text-2xl font-black text-slate-800 uppercase mb-3">Đề kiểm tra {editExamType || 'giữa kì 1'}</h1>
                     <div className="flex flex-wrap items-center justify-center gap-2 text-sm font-medium text-slate-600">
                       <span><span className="font-bold text-slate-700">Bài thi:</span> {editTitle || editingExam.title}</span>
                       <span className="text-slate-300">&bull;</span>
@@ -3464,7 +3464,7 @@ return (
                   <div className="p-4 rounded-2xl border border-slate-200">
                     <div className="text-[11px] font-bold text-slate-700 uppercase mb-3">Loại bài kiểm tra *</div>
                     <div className="flex gap-3 flex-wrap">
-                      {['Thường xuyên', 'Giữa kỳ 1', 'Cuối kỳ 1', 'Giữa kỳ 2', 'Cuối kỳ 2'].map(type => (
+                      {['Giữa kì 1', 'Cuối kì 1', 'Giữa kì 2', 'Cuối kỳ 2'].map(type => (
                         <label key={type} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border cursor-pointer transition-all ${assignmentType === type ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-bold' : 'border-slate-200 hover:bg-slate-50 text-slate-600'}`}>
                           <input 
                             type="radio" 
@@ -4183,7 +4183,7 @@ return (
             <div className="p-5 border-b border-slate-100 flex items-start justify-between bg-white shrink-0">
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 uppercase">{statsExam.examType || 'Thường xuyên'}</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 uppercase">{statsExam.examType || 'Giữa kì 1'}</span>
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 uppercase">{statsExam.grade?.startsWith('Khối') ? statsExam.grade : (statsExam.grade ? `Khối ${statsExam.grade}` : 'Khối 3')}</span>
                   {statsExam.targetClass && <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-700 uppercase">{statsExam.targetClass.startsWith('Lớp') ? statsExam.targetClass : `Lớp ${statsExam.targetClass}`}</span>}
                 </div>

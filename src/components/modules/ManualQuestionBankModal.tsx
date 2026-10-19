@@ -41,7 +41,7 @@ export const ManualQuestionBankModal: React.FC<ManualQuestionBankModalProps> = (
   const [lessonName, setLessonName] = useState(initialLessonName || '');
   const [grade, setGrade] = useState(initialGrade || GRADES[0] || 'Khối 3');
   const [subject, setSubject] = useState(initialSubject || SUBJECTS[0] || 'Toán');
-  const [examType, setExamType] = useState(EXAM_TYPES[0] || 'Thường xuyên');
+  const [examType, setExamType] = useState(EXAM_TYPES[0] || 'Giữa kì 1');
   const [durationMinutes, setDurationMinutes] = useState<number>(45);
   const [defaultLevel, setDefaultLevel] = useState<CognitiveLevel>('nhan_biet');
   const [saveToGlobal, setSaveToGlobal] = useState<boolean>(defaultSaveToGlobal);
@@ -169,7 +169,7 @@ export const ManualQuestionBankModal: React.FC<ManualQuestionBankModalProps> = (
       });
 
       onSaveQuestions(sanitized, saveToGlobal, {
-        examType: examType || 'Thường xuyên',
+        examType: examType || 'Giữa kì 1',
         durationMinutes: Number(durationMinutes) || 45,
         lessonName,
         grade,

@@ -134,7 +134,7 @@ export const UseQuestionBankModal: React.FC<UseQuestionBankModalProps> = ({
   const [levelFilter, setLevelFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [questionCount, setQuestionCount] = useState(10);
-  const [examType, setExamType] = useState<string>(EXAM_TYPES[0] || 'Thường xuyên');
+  const [examType, setExamType] = useState<string>(EXAM_TYPES[0] || 'Giữa kì 1');
   const [durationMinutes, setDurationMinutes] = useState<number>(45);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const isSubmittingRef = React.useRef<boolean>(false);
@@ -142,7 +142,7 @@ export const UseQuestionBankModal: React.FC<UseQuestionBankModalProps> = ({
   // Synchronize when modal opens or initial props update
   React.useEffect(() => {
     if (isOpen) {
-      setExamType(EXAM_TYPES[0] || 'Thường xuyên');
+      setExamType(EXAM_TYPES[0] || 'Giữa kì 1');
       setDurationMinutes(45);
       setSelectedClasses([]);
       setClassError(null);
@@ -466,7 +466,7 @@ export const UseQuestionBankModal: React.FC<UseQuestionBankModalProps> = ({
           grade,
           targetClasses: uniqueClasses,
           questions: selectedQuestions,
-          examType: examType || 'Thường xuyên',
+          examType: examType || 'Giữa kì 1',
           durationMinutes: Number(durationMinutes) || 45,
         });
       }

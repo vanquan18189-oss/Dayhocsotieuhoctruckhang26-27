@@ -294,3 +294,118 @@ export function useClassesList() {
     getClassesForGrade
   };
 }
+
+/**
+ * Chuẩn hóa khối (ví dụ "Khối 3", "3", 3, "K3" -> "3")
+ */
+export function normalizeGradeKey(gradeVal?: string | number): string {
+  if (gradeVal === undefined || gradeVal === null) return '';
+  const str = String(gradeVal).trim();
+  const match = str.match(/\d+/);
+  return match ? match[0] : str.toLowerCase();
+}
+
+/**
+ * Lấy khối chuẩn dạng "Khối X"
+ */
+export function formatGradeStandard(gradeVal?: string | number): string {
+  const digit = normalizeGradeKey(gradeVal);
+  if (/^\d+$/.test(digit)) {
+    return `Khối ${digit}`;
+  }
+  return String(gradeVal || 'Khối 3');
+}
+
+/**
+ * Suy ra khối từ tên lớp (ví dụ "3A" -> "3", "Lớp 4C" -> "4")
+ */
+export function inferGradeFromClassName(className?: string): string {
+  if (!className) return '';
+  const digit = extractGradeDigit(className);
+  return digit ? `Khối ${digit}` : '';
+}
+
+/**
+ * Lọc danh sách lớp theo khối, phân quyền, sắp xếp theo tên (và theo khối nếu "Tất cả Khối").
+ */
+export function getFilteredClassesForGrade(
+  classes: SchoolClassItem[],
+  gradeFilter?: string | null,
+  userRole?: string,
+  currentUser?: any
+): { classesList: SchoolClassItem[]; hasNoClassesInGrade: boolean } {
+  if (!Array.isArray(classes)) return { classesList: [], hasNoClassesInGrade: true };
+
+  const normGrade = normalizeGradeKey(gradeFilter);
+  const isAllGrades = !gradeFilter || 
+    gradeFilter === 'Tất cả' || 
+    gradeFilter === 'Tất cả các khối' || 
+    gradeFilter === 'all' || 
+    normGrade === 'all' ||
+    normGrade === '';
+
+  // 1. Lọc theo khối
+  let matched = classes;
+  if (!isAllGrades) {
+    matched = classes.filter(c => {
+      const cGrade = c.grade || inferGradeFromClassName(c.name);
+      const cNorm = normalizeGradeKey(cGrade);
+      return cNorm === normGrade;
+    });
+  }
+
+  // 2. Phân quyền (Role-based filtering)
+  const role = (userRole || currentUser?.role || '').toLowerCase();
+  if (role === 'teacher' || role === 'gv') {
+    const assigned = currentUser?.homeroomClasses || currentUser?.assignedClasses || currentUser?.teachingClasses || [];
+    if (Array.isArray(assigned) && assigned.length > 0) {
+      const normAssigned = assigned.map((a: string) => a.trim().toLowerCase().replace(/^lớp\s*/i, ''));
+      matched = matched.filter(c => {
+        const cNameClean = c.name.trim().toLowerCase().replace(/^lớp\s*/i, '');
+        const cIdClean = c.id.trim().toLowerCase();
+        return normAssigned.includes(cNameClean) || normAssigned.includes(cIdClean);
+      });
+    }
+  } else if (role === 'student' || role === 'hoc_sinh') {
+    const studentClass = currentUser?.class || currentUser?.className || currentUser?.classId || '';
+    if (studentClass) {
+      const targetClean = studentClass.trim().toLowerCase().replace(/^lớp\s*/i, '');
+      matched = matched.filter(c => {
+        const cNameClean = c.name.trim().toLowerCase().replace(/^lớp\s*/i, '');
+        return c.id.trim().toLowerCase() === targetClean || cNameClean === targetClean;
+      });
+    }
+  }
+
+  // 3. Sắp xếp
+  if (isAllGrades) {
+    matched.sort((a, b) => {
+      const digitA = extractGradeDigit(a.grade || a.name) || '0';
+      const digitB = extractGradeDigit(b.grade || b.name) || '0';
+      if (digitA !== digitB) return digitA.localeCompare(digitB);
+      return a.name.localeCompare(b.name, 'vi', { numeric: true });
+    });
+  } else {
+    matched.sort((a, b) => a.name.localeCompare(b.name, 'vi', { numeric: true }));
+  }
+
+  const hasNoClassesInGrade = !isAllGrades && matched.length === 0;
+  return { classesList: matched, hasNoClassesInGrade };
+}
+
+/**
+ * Custom hook: useClassOptions(gradeFilter, userRole, currentUser)
+ */
+export function useClassOptions(gradeFilter?: string | null, userRole?: string, currentUser?: any) {
+  const { classes, loading } = useClassesList();
+
+  const { classesList, hasNoClassesInGrade } = useMemo(() => {
+    return getFilteredClassesForGrade(classes, gradeFilter, userRole, currentUser);
+  }, [classes, gradeFilter, userRole, currentUser]);
+
+  return {
+    classes: classesList,
+    loading,
+    hasNoClassesInGrade
+  };
+}
