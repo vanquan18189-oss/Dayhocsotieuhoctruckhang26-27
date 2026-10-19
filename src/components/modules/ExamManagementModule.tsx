@@ -410,6 +410,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   const [assignmentRetryLimit, setAssignmentRetryLimit] = useState(0);
   const [assignmentShuffleQuestions, setAssignmentShuffleQuestions] = useState(false);
   const [assignmentShuffleAnswers, setAssignmentShuffleAnswers] = useState(false);
+  const [assignmentLiveMode, setAssignmentLiveMode] = useState<boolean>(true);
   const [assignmentTarget, setAssignmentTarget] = useState('Cả lớp');
 
   // Filter available classes strictly by exam grade (e.g. "Khối 5" -> "Lớp 5C", "Lớp 5D")
@@ -446,6 +447,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     setAssignmentTitle(exam.title);
     setAssignmentDuration(exam.durationMinutes);
     setAssignmentTab('select_class');
+    setAssignmentLiveMode(true); // Mặc định bật mỗi lần mở popup
 
     // Dynamic current date & time
     const nowStr = getFormattedCurrentDateDisplay(0);
@@ -523,6 +525,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         endTime: endTimeVal,
         submissionsCount: assignmentExam.submissionsCount || 0,
         totalStudents: uniqueClasses.length * 35,
+        liveMode: assignmentLiveMode,
       };
 
       onSaveExam(masterExam);
@@ -2641,6 +2644,7 @@ return (
                   <th className="px-6 py-4 text-purple-600 text-center">Loại KT</th>
                   <th className="px-6 py-4 text-orange-600">Thời gian thi</th>
                   <th className="px-6 py-4 text-blue-600 text-center">Đã làm</th>
+                  <th className="px-6 py-4 text-amber-600 text-center">Thi đua</th>
                   <th className="px-6 py-4 text-rose-600 text-center">Thao tác</th>
                 </tr>
               </thead>
@@ -2739,6 +2743,25 @@ return (
                           }
                           return <span className="text-slate-400 font-medium">---</span>;
                         })()}
+                      </td>
+                      <td className="px-6 py-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newLive = exam.liveMode === false ? true : false;
+                            const updated = { ...exam, liveMode: newLive };
+                            onSaveExam(updated);
+                            showToast(`⚡ Đã ${newLive ? 'bật' : 'tắt'} chế độ thi đua cho đề "${exam.title}"!`);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                            exam.liveMode !== false
+                              ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 shadow-2xs'
+                              : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                          }`}
+                          title={exam.liveMode !== false ? 'Chế độ thi đua real-time đang BẬT. Bấm để tắt.' : 'Chế độ thi đua đang TẮT. Bấm để bật.'}
+                        >
+                          <span>{exam.liveMode !== false ? '⚡ BẬT' : '💤 TẮT'}</span>
+                        </button>
                       </td>
                       <td className="px-6 py-4 text-center">
                         <button 
@@ -3631,6 +3654,13 @@ return (
                             <input type="checkbox" checked={assignmentShuffleAnswers} onChange={(e) => setAssignmentShuffleAnswers(e.target.checked)} className="text-indigo-600 focus:ring-indigo-500 rounded w-4 h-4 cursor-pointer" />
                             Đảo thứ tự đáp án
                           </label>
+                          <label className="flex items-start gap-2.5 cursor-pointer text-sm font-semibold text-slate-700 select-none pt-2 border-t border-slate-200">
+                            <input type="checkbox" checked={assignmentLiveMode} onChange={(e) => setAssignmentLiveMode(e.target.checked)} className="text-indigo-600 focus:ring-indigo-500 rounded w-4 h-4 cursor-pointer mt-0.5" />
+                            <div>
+                              <span className="text-indigo-950 font-black text-xs block">⚡ Chế độ thi đua (real-time)</span>
+                              <p className="text-[11px] text-slate-500 font-normal mt-0.5">Bật: hiện bảng xếp hạng và học sinh đang làm bài theo thời gian thực (tốn nhiều lượt truy cập). Tắt: chỉ lưu kết quả khi nộp bài.</p>
+                            </div>
+                          </label>
                         </div>
                       </div>
                     )}
@@ -3873,6 +3903,25 @@ return (
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newLive = trackingExam.liveMode === false ? true : false;
+                    const updated = { ...trackingExam, liveMode: newLive };
+                    setTrackingExam(updated);
+                    onSaveExam(updated);
+                    showToast(`⚡ Đã ${newLive ? 'bật' : 'tắt'} chế độ thi đua (real-time) cho đề kiểm tra này!`);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all cursor-pointer ${
+                    trackingExam.liveMode !== false
+                      ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                  }`}
+                  title={trackingExam.liveMode !== false ? 'Đang bật bảng xếp hạng thi đua real-time. Bấm để tắt (tiết kiệm Firestore).' : 'Đang tắt thi đua. Bấm để bật.'}
+                >
+                  <span>{trackingExam.liveMode !== false ? '⚡ Thi đua: BẬT' : '💤 Thi đua: TẮT'}</span>
+                </button>
+
                 <button
                   onClick={() => handleExportExcel(trackingExam)}
                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-sm whitespace-nowrap"

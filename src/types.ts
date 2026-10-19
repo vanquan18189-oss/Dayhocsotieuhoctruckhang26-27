@@ -152,6 +152,7 @@ export interface ExamPaper {
   originalExamId?: string;
   assignmentDate?: string;
   submissions?: any[];
+  liveMode?: boolean;
 }
 
 export interface AssignmentSubmission {
@@ -206,6 +207,7 @@ export interface HomeworkAssignment {
   submittedIds?: string[];
   createdAt: string;
   originalAssignmentId?: string;
+  liveMode?: boolean;
 }
 
 export type GameType = 'golden_bell' | 'speed_quiz' | 'lucky_wheel' | 'flashcards';

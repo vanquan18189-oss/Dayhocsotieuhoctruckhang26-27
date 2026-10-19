@@ -534,6 +534,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
   const [assignMaxAttempts, setAssignMaxAttempts] = useState<string>('Không giới hạn số lần luyện tập');
   const [assignShuffleQuestions, setAssignShuffleQuestions] = useState<boolean>(true);
   const [assignShuffleOptions, setAssignShuffleOptions] = useState<boolean>(true);
+  const [assignLiveMode, setAssignLiveMode] = useState<boolean>(true);
   const [assignTargetType, setAssignTargetType] = useState<'all' | 'specific'>('all');
   const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
 
@@ -556,6 +557,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     setAssignMaxAttempts('Không giới hạn số lần luyện tập');
     setAssignShuffleQuestions(true);
     setAssignShuffleOptions(true);
+    setAssignLiveMode(true);
     setAssignTargetType('all');
     setSelectedStudentIds(CLASS_3A_STUDENTS.map(s => s.code));
   };
@@ -594,7 +596,8 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
         dueDate: assignDueDate || assigningConfigAssignment.dueDate,
         totalStudents: totalStudentsSum,
         completedCount: assigningConfigAssignment.completedCount || 0,
-        submissions: assigningConfigAssignment.submissions || []
+        submissions: assigningConfigAssignment.submissions || [],
+        liveMode: assignLiveMode
       };
 
       onSaveAssignment(masterAssignment);
@@ -1325,13 +1328,14 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                 <th className="py-3.5 px-4 whitespace-nowrap">LỚP</th>
                 <th className="py-3.5 px-4 whitespace-nowrap">NGÀY GIAO</th>
                 <th className="py-3.5 px-4 whitespace-nowrap">ĐÃ LÀM</th>
+                <th className="py-3.5 px-4 text-center whitespace-nowrap">THI ĐUA</th>
                 <th className="py-3.5 px-4 text-center whitespace-nowrap">THAO TÁC</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {paginatedAssignments.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="text-center py-12 text-slate-400 font-medium">
+                  <td colSpan={7} className="text-center py-12 text-slate-400 font-medium">
                     Không tìm thấy bài tập nào phù hợp với bộ lọc.
                   </td>
                 </tr>
@@ -1425,6 +1429,27 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                             {percent}%
                           </span>
                         </div>
+                      </td>
+
+                      {/* Thi đua (Live mode) */}
+                      <td className="py-4 px-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newLive = as.liveMode === false ? true : false;
+                            const updated = { ...as, liveMode: newLive };
+                            onSaveAssignment(updated);
+                            showToast(`⚡ Đã ${newLive ? 'bật' : 'tắt'} chế độ thi đua cho bài tập "${as.title}"!`);
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                            as.liveMode !== false
+                              ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 shadow-2xs'
+                              : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
+                          }`}
+                          title={as.liveMode !== false ? 'Chế độ thi đua real-time đang BẬT. Bấm để tắt.' : 'Chế độ thi đua đang TẮT. Bấm để bật.'}
+                        >
+                          <span>{as.liveMode !== false ? '⚡ BẬT' : '💤 TẮT'}</span>
+                        </button>
                       </td>
 
                       {/* Thao tác */}
@@ -2498,6 +2523,25 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
               </div>
 
               <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newLive = detailAssignment.liveMode === false ? true : false;
+                    const updated = { ...detailAssignment, liveMode: newLive };
+                    setDetailAssignment(updated);
+                    onSaveAssignment(updated);
+                    showToast(`⚡ Đã ${newLive ? 'bật' : 'tắt'} chế độ thi đua (real-time) cho bài tập này!`);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-all cursor-pointer ${
+                    detailAssignment.liveMode !== false
+                      ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100 shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
+                  }`}
+                  title={detailAssignment.liveMode !== false ? 'Đang bật bảng xếp hạng thi đua real-time. Bấm để tắt (tiết kiệm Firestore).' : 'Đang tắt thi đua. Bấm để bật.'}
+                >
+                  <span>{detailAssignment.liveMode !== false ? '⚡ Thi đua: BẬT' : '💤 Thi đua: TẮT'}</span>
+                </button>
+
                 <button
                   onClick={handleExportExcel}
                   className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
@@ -3587,10 +3631,10 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
 
       {/* MODAL: CẤU HÌNH GIAO BÀI TẬP */}
       {assigningConfigAssignment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
-          <div className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
-            <div className="p-5 bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-900 text-white flex items-center justify-between">
+            <div className="p-5 bg-gradient-to-r from-indigo-900 via-indigo-800 to-indigo-900 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center text-xl shadow-inner border border-white/20">
                   🚀
@@ -3613,7 +3657,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+            <div className="p-6 space-y-5 flex-1 min-h-0 overflow-y-auto">
               {/* 1. Tiêu đề bài giao */}
               <div className="space-y-1.5">
                 <label className="text-xs font-extrabold text-slate-800 uppercase tracking-wider block">
@@ -3769,6 +3813,19 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                         <p className="text-[11px] text-slate-500 font-normal">Xáo trộn thứ tự các đáp án A, B, C, D ngẫu nhiên</p>
                       </div>
                     </label>
+
+                    <label className="flex items-start gap-2.5 cursor-pointer text-xs font-bold text-slate-800 select-none pt-2 border-t border-slate-200">
+                      <input
+                        type="checkbox"
+                        checked={assignLiveMode}
+                        onChange={(e) => setAssignLiveMode(e.target.checked)}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-300 cursor-pointer mt-0.5"
+                      />
+                      <div>
+                        <span className="text-indigo-950 font-black">⚡ Chế độ thi đua (real-time)</span>
+                        <p className="text-[11px] text-slate-500 font-normal">Bật: hiện bảng xếp hạng và học sinh đang làm bài theo thời gian thực (tốn nhiều lượt truy cập). Tắt: chỉ lưu kết quả khi nộp bài.</p>
+                      </div>
+                    </label>
                   </div>
                 </div>
               </div>
@@ -3860,7 +3917,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3">
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
               <button
                 type="button"
                 onClick={() => setAssigningConfigAssignment(null)}

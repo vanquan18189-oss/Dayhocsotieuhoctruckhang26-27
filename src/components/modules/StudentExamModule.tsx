@@ -33,6 +33,7 @@ import {
   completeQuizLiveSession,
   leaveQuizLiveSession,
   subscribeQuizLiveParticipants,
+  getAdminGlobalLiveMode,
   LiveQuizParticipant
 } from '../../services/liveQuizSessionService';
 import { getStudentGameProfile } from '../../services/studentGameStoreService';
@@ -722,6 +723,9 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
     if (mode !== 'assignment') return;
 
     const exam = activeExamSession.exam;
+    const isLive = exam.liveMode !== false && getAdminGlobalLiveMode();
+    if (!isLive) return;
+
     const examId = exam.id || 'ex-session';
     const examTitle = exam.title || 'Bài tập';
     const totalQ = (exam.questions || []).length || 10;
@@ -759,12 +763,15 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
     return () => {
       unsubscribe();
     };
-  }, [activeExamSession?.exam?.id, currentUserId, currentUserName, mode]);
+  }, [activeExamSession?.exam?.id, activeExamSession?.exam?.liveMode, currentUserId, currentUserName, mode]);
 
   // Update real-time progress on answers change (Chỉ áp dụng cho Bài tập / mode === 'assignment')
   useEffect(() => {
     if (!activeExamSession) return;
     if (mode !== 'assignment') return;
+    const isLive = activeExamSession.exam?.liveMode !== false && getAdminGlobalLiveMode();
+    if (!isLive) return;
+
     const examId = activeExamSession.exam.id || 'ex-session';
     const totalQ = (activeExamSession.exam.questions || []).length || 10;
 
@@ -785,7 +792,7 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
       answeredCount: ansCount,
       totalQuestions: totalQ
     });
-  }, [activeExamSession?.answers, activeExamSession?.currentQuestionIndex, mode]);
+  }, [activeExamSession?.answers, activeExamSession?.currentQuestionIndex, activeExamSession?.exam?.liveMode, mode]);
 
   // Re-sync submissions when student user switches & sanitize any polluted records
   useEffect(() => {
@@ -1045,25 +1052,28 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
 
       // Sync completion to live quiz sessions (Chỉ áp dụng cho Bài tập / mode === 'assignment')
       if (mode === 'assignment') {
-        try {
-          const effectiveInfo = getEffectiveStudentClassAndGrade();
-          const gameProfile = getStudentGameProfile(currentUserId, currentUserName);
-          const avatarEmoji = gameProfile.equippedAvatar || gameProfile.avatar || '🌟';
-          completeQuizLiveSession({
-            targetId: exam.id || 'ex-auto',
-            studentId: currentUserId,
-            studentName: currentUserName,
-            studentClass: effectiveInfo.studentClass,
-            studentAvatar: avatarEmoji,
-            score: scoreNumber,
-            scoreStr: scoreVal,
-            percentage: scorePercentage,
-            totalQuestions: totalQ,
-            answeredCount: totalQ,
-            timeSpentSeconds: (activeExamSession.durationMinutes || 15) * 60
-          });
-        } catch (err) {
-          console.error('Error completing live quiz session on timeout:', err);
+        const isLive = exam.liveMode !== false && getAdminGlobalLiveMode();
+        if (isLive) {
+          try {
+            const effectiveInfo = getEffectiveStudentClassAndGrade();
+            const gameProfile = getStudentGameProfile(currentUserId, currentUserName);
+            const avatarEmoji = gameProfile.equippedAvatar || gameProfile.avatar || '🌟';
+            completeQuizLiveSession({
+              targetId: exam.id || 'ex-auto',
+              studentId: currentUserId,
+              studentName: currentUserName,
+              studentClass: effectiveInfo.studentClass,
+              studentAvatar: avatarEmoji,
+              score: scoreNumber,
+              scoreStr: scoreVal,
+              percentage: scorePercentage,
+              totalQuestions: totalQ,
+              answeredCount: totalQ,
+              timeSpentSeconds: (activeExamSession.durationMinutes || 15) * 60
+            });
+          } catch (err) {
+            console.error('Error completing live quiz session on timeout:', err);
+          }
         }
       }
     }
@@ -1749,28 +1759,31 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
         
         // Complete live quiz session in Firestore & localStorage (Chỉ áp dụng cho Bài tập / mode === 'assignment')
         if (mode === 'assignment') {
-          try {
-            const effectiveInfo = getEffectiveStudentClassAndGrade();
-            const gameProfile = getStudentGameProfile(currentUserId, currentUserName);
-            const avatarEmoji = gameProfile.equippedAvatar || gameProfile.avatar || '🌟';
-            const sessionDuration = activeExamSession?.durationMinutes || 15;
-            const timeSpentSec = Math.max(10, Math.floor((Date.now() - activeExamSession.startTime) / 1000));
+          const isLive = exam.liveMode !== false && getAdminGlobalLiveMode();
+          if (isLive) {
+            try {
+              const effectiveInfo = getEffectiveStudentClassAndGrade();
+              const gameProfile = getStudentGameProfile(currentUserId, currentUserName);
+              const avatarEmoji = gameProfile.equippedAvatar || gameProfile.avatar || '🌟';
+              const sessionDuration = activeExamSession?.durationMinutes || 15;
+              const timeSpentSec = Math.max(10, Math.floor((Date.now() - activeExamSession.startTime) / 1000));
 
-            completeQuizLiveSession({
-              targetId: exam.id || 'ex-manual',
-              studentId: currentUserId,
-              studentName: currentUserName,
-              studentClass: effectiveInfo.studentClass,
-              studentAvatar: avatarEmoji,
-              score: scoreNumber,
-              scoreStr: scoreVal,
-              percentage: scorePercentage,
-              totalQuestions: totalQ,
-              answeredCount: totalQ,
-              timeSpentSeconds: timeSpentSec
-            });
-          } catch (err) {
-            console.error('Error completing live quiz session on submit:', err);
+              completeQuizLiveSession({
+                targetId: exam.id || 'ex-manual',
+                studentId: currentUserId,
+                studentName: currentUserName,
+                studentClass: effectiveInfo.studentClass,
+                studentAvatar: avatarEmoji,
+                score: scoreNumber,
+                scoreStr: scoreVal,
+                percentage: scorePercentage,
+                totalQuestions: totalQ,
+                answeredCount: totalQ,
+                timeSpentSeconds: timeSpentSec
+              });
+            } catch (err) {
+              console.error('Error completing live quiz session on submit:', err);
+            }
           }
         }
       }
@@ -2765,8 +2778,8 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
 
           </div>
 
-          {/* Right Column: Bảng Xếp Hạng & Đang Làm Bài (Moon.vn style - Chỉ hiển thị cho màn hình LÀM BÀI TẬP mode === 'assignment') */}
-          {mode === 'assignment' && (
+          {/* Right Column: Bảng Xếp Hạng & Đang Làm Bài (Moon.vn style - Chỉ hiển thị cho màn hình LÀM BÀI TẬP mode === 'assignment' VÀ liveMode === true) */}
+          {mode === 'assignment' && (activeExamSession.exam.liveMode !== false && getAdminGlobalLiveMode()) && (
             <QuizLiveSidebar
               targetTitle={activeExamSession.exam.title}
               subject={activeExamSession.exam.subject || 'Tin học'}

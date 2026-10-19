@@ -53,6 +53,7 @@ import { formatScore } from '../../utils/scoreUtils';
 import { groupAndCountErrors } from '../../services/firestoreWriteTracker';
 import { runSaveOperation, verifyServerDocWritten } from '../../utils/saveUtils';
 import { trackedWriteBatch } from '../../services/firestoreWriteTracker';
+import { getAdminGlobalLiveMode, setAdminGlobalLiveMode } from '../../services/liveQuizSessionService';
 import {
   downloadStudentImportTemplate,
   exportStudentCredentialsExcel,
@@ -499,7 +500,8 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
   userRole
 }) => {
   // Main Tab: 'students' vs 'teachers' vs 'promotion'
-  const [mainTab, setMainTab] = useState<'students' | 'teachers' | 'promotion'>('students');
+  const [mainTab, setMainTab] = useState<'students' | 'teachers' | 'promotion' | 'settings'>('students');
+  const [adminGlobalLiveMode, setAdminGlobalLiveModeState] = useState<boolean>(() => getAdminGlobalLiveMode());
   
   // User Authentication & RBAC Resolution
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(() => auth?.currentUser || null);
@@ -1886,12 +1888,65 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
             <span className="text-base sm:text-lg">🎓</span>
             <span>LÊN LỚP CUỐI NĂM (QUẢN TRỊ)</span>
           </button>
+
+          <button
+            onClick={() => {
+              setMainTab('settings');
+            }}
+            className={`px-5 py-3 rounded-2xl font-black text-xs sm:text-sm flex items-center gap-2.5 transition-all cursor-pointer shadow-xs whitespace-nowrap ${
+              mainTab === 'settings'
+                ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white shadow-blue-200 scale-102'
+                : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/80'
+            }`}
+          >
+            <span className="text-base sm:text-lg">⚙️</span>
+            <span>CÀI ĐẶT HỆ THỐNG</span>
+          </button>
         </div>
 
         <div className="text-[11px] font-bold text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl self-end sm:self-center">
           Vai trò hiện tại: <span className="text-indigo-600 uppercase font-extrabold">{userRole}</span>
         </div>
       </div>
+
+      {mainTab === 'settings' && (
+        <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-6 animate-fade-in">
+          <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+            <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+              ⚙️
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900 font-heading">Cài Đặt Hệ Thống & Cấu Hình Chung</h3>
+              <p className="text-xs text-slate-500">Quản lý cấu hình toàn hệ thống cho giáo viên và học sinh</p>
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl border border-slate-200 bg-slate-50/50 flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <span>⚡ Cho phép chế độ thi đua (Real-time Global Live Mode)</span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Nếu tắt, toàn bộ bài tập và đề kiểm tra sẽ tự động tắt real-time, học sinh chỉ nộp kết quả 1 lần cuối cùng (tiết kiệm lượt đọc/ghi Firestore tối đa).
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={adminGlobalLiveMode}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setAdminGlobalLiveMode(val);
+                  setAdminGlobalLiveModeState(val);
+                  showToast(`⚙️ Đã ${val ? 'bật' : 'tắt'} chế độ thi đua tổng toàn hệ thống!`);
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+            </label>
+          </div>
+        </div>
+      )}
 
       {/* ======================================================== */}
       {/* TAB 1: QUẢN LÝ HỌC SINH (5 KHỐI LỚP)                     */}
