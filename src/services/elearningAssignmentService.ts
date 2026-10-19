@@ -202,10 +202,6 @@ export function getLocalCachedAssignedELearning(): AssignedELearningLesson[] {
     console.warn('Error scanning cached assignments for elearning items:', err);
   }
 
-  if (combined.length === 0) {
-    combined = DEFAULT_ASSIGNED_ELEARNING_SEEDS;
-  }
-
   return normalizeAssignedELearningLessons(combined);
 }
 

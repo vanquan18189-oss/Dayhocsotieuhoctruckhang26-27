@@ -60,6 +60,10 @@ import {
 } from '../../services/studentSessionService';
 import { auth } from '../../services/firebase';
 import { resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
+import {
+  getLocalCachedQuestions,
+  subscribeToQuestionsFromFirestore
+} from '../../services/questionStorageService';
 
 interface InteractiveGamesModuleProps {
   games: GameItem[];
@@ -117,6 +121,22 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [embeddedGameUrl, setEmbeddedGameUrl] = useState<string | null>(null);
   const [embeddedGameTitle, setEmbeddedGameTitle] = useState<string>('');
+
+  const [totalQuestionsCount, setTotalQuestionsCount] = useState<number>(() => {
+    try {
+      const cached = getLocalCachedQuestions();
+      return Array.isArray(cached) ? cached.length : 0;
+    } catch {
+      return 0;
+    }
+  });
+
+  useEffect(() => {
+    const unsubscribe = subscribeToQuestionsFromFirestore((liveQuestions) => {
+      setTotalQuestionsCount(Array.isArray(liveQuestions) ? liveQuestions.length : 0);
+    });
+    return () => unsubscribe();
+  }, []);
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
@@ -1287,7 +1307,7 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
                   <HelpCircle className="w-6 h-6 text-emerald-100" />
                 </div>
                 <div>
-                  <div className="text-3xl font-black">74</div>
+                  <div className="text-3xl font-black">{totalQuestionsCount}</div>
                   <div className="text-[10px] font-black uppercase tracking-wider text-emerald-100 mt-0.5">CÂU HỎI CÓ SẴN TỪ NGÂN HÀNG</div>
                 </div>
               </div>
