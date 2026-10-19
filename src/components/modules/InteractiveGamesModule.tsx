@@ -1,4 +1,4 @@
-import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, getCorrectOrderingSequence } from '../../lib/constants';
+import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, getCorrectOrderingSequence, isGradeMatching } from '../../lib/constants';
 import { useClassesList } from '../../services/classStorageService';
 import { getStudentAvatarSource, DEFAULT_ANIMAL_AVATAR } from '../common/AnimalAvatars';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -52,7 +52,8 @@ import {
   getLocalCachedQuizziGames,
   saveMultipleQuizziGamesToFirestore,
   deleteQuizziGameFromFirestore,
-  subscribeToQuizziGamesFromFirestore
+  subscribeToQuizziGamesFromFirestore,
+  subscribeToGamesFromFirestore
 } from '../../services/gameStorageService';
 import {
   getEffectiveStudentClassAndGrade,
@@ -131,12 +132,31 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
     }
   });
 
+  // Real-time synchronization directly with Firestore 'games' collection for live competition rooms
+  const [realtimeGames, setRealtimeGames] = useState<GameItem[]>(() => games || []);
+
+  useEffect(() => {
+    if (games && games.length > 0) {
+      setRealtimeGames(games);
+    }
+  }, [games]);
+
+  useEffect(() => {
+    const unsub = subscribeToGamesFromFirestore((loadedGames) => {
+      if (Array.isArray(loadedGames)) {
+        setRealtimeGames(loadedGames);
+      }
+    });
+    return () => unsub();
+  }, []);
+
   useEffect(() => {
     const unsubscribe = subscribeToQuestionsFromFirestore((liveQuestions) => {
       setTotalQuestionsCount(Array.isArray(liveQuestions) ? liveQuestions.length : 0);
     });
     return () => unsubscribe();
   }, []);
+
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3500);
@@ -149,11 +169,34 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
     }
   }, [initialTab]);
 
+  // Helpers for flexible filtering of live game rooms
+  const isClassMatching = useCallback((roomClass?: string, filterClassVal?: string): boolean => {
+    if (!filterClassVal || filterClassVal === 'Tất cả các lớp' || filterClassVal === 'Tất cả các Lớp' || filterClassVal === 'Tất cả') {
+      return true;
+    }
+    if (!roomClass) return true;
+    const cleanFilter = filterClassVal.replace(/^Lớp\s*/i, '').trim().toLowerCase();
+    const cleanRoom = roomClass.replace(/^Lớp\s*/i, '').trim().toLowerCase();
+    if (cleanRoom === cleanFilter) return true;
+    return cleanRoom.includes(cleanFilter) || cleanFilter.includes(cleanRoom);
+  }, []);
+
+  const isSubjectMatching = useCallback((roomSubject?: string, filterSubjectVal?: string): boolean => {
+    if (!filterSubjectVal || filterSubjectVal === 'Tất cả các môn' || filterSubjectVal === 'Tất cả') {
+      return true;
+    }
+    if (!roomSubject) return true;
+    const cleanFilter = filterSubjectVal.toLowerCase().trim();
+    const cleanRoom = roomSubject.toLowerCase().trim();
+    return cleanRoom === cleanFilter || cleanRoom.includes(cleanFilter) || cleanFilter.includes(cleanRoom);
+  }, []);
+
   // Tự động chuẩn hóa dữ liệu cũ (backward compatibility):
   // Nếu có phòng trò chơi mang danh sách nhiều lớp (vd: "Lớp 3A, Lớp 3B"), tự động tách thành các phòng riêng biệt
   useEffect(() => {
     if (!onUpdateGame) return;
-    const legacyGames = (games || []).filter(g => g.classInfo && g.classInfo.includes(','));
+    const effectiveGamesList = realtimeGames && realtimeGames.length > 0 ? realtimeGames : (games || []);
+    const legacyGames = effectiveGamesList.filter(g => g.classInfo && g.classInfo.includes(','));
     if (legacyGames.length > 0) {
       legacyGames.forEach(game => {
         const classes = game.classInfo!.split(',').map(c => c.trim()).filter(Boolean);
@@ -176,12 +219,14 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
         }
       });
     }
-  }, [games, onUpdateGame]);
+  }, [realtimeGames, games, onUpdateGame]);
 
   // Chuẩn hóa danh sách game: Mỗi dòng đại diện cho 1 phòng độc lập của 1 lớp duy nhất (Mô hình 1 đề - N lần giao)
   const normalizedGames = useMemo(() => {
     const list: GameItem[] = [];
-    (games || []).forEach(game => {
+    const sourceGames = realtimeGames && realtimeGames.length > 0 ? realtimeGames : (games || []);
+    (sourceGames || []).forEach(game => {
+      if (!game) return;
       if (game.classInfo && game.classInfo.includes(',')) {
         const classes = game.classInfo.split(',').map(c => c.trim()).filter(Boolean);
         if (classes.length > 0) {
@@ -202,7 +247,7 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
       }
     });
     return list;
-  }, [games]);
+  }, [realtimeGames, games]);
 
   // Listen for external open game store triggers
   useEffect(() => {
@@ -1382,9 +1427,9 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
                 {(() => {
                   const customRooms = normalizedGames.filter(g => g.id !== 'game-1' && g.id !== 'game-2' && g.id !== 'game-3' && g.id !== 'game-4');
                   const filteredRooms = customRooms.filter(room => {
-                    if (filterGrade !== 'Tất cả các khối' && filterGrade !== 'Tất cả' && room.grade && room.grade !== filterGrade) return false;
-                    if (filterClass !== 'Tất cả các lớp' && filterClass !== 'Tất cả' && room.classInfo && room.classInfo !== filterClass) return false;
-                    if (filterSubject !== 'Tất cả các môn' && filterSubject !== 'Tất cả' && room.subject && room.subject.toLowerCase() !== filterSubject.toLowerCase()) return false;
+                    if (!isGradeMatching(room.grade, filterGrade)) return false;
+                    if (!isClassMatching(room.classInfo, filterClass)) return false;
+                    if (!isSubjectMatching(room.subject, filterSubject)) return false;
                     return true;
                   });
 
@@ -1557,9 +1602,9 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
               {(() => {
                 const customRooms = normalizedGames.filter(g => g.id !== 'game-1' && g.id !== 'game-2' && g.id !== 'game-3' && g.id !== 'game-4');
                 const filteredRooms = customRooms.filter(room => {
-                  if (filterGrade !== 'Tất cả các khối' && filterGrade !== 'Tất cả' && room.grade && room.grade !== filterGrade) return false;
-                  if (filterClass !== 'Tất cả các lớp' && filterClass !== 'Tất cả' && room.classInfo && room.classInfo !== filterClass) return false;
-                  if (filterSubject !== 'Tất cả các môn' && filterSubject !== 'Tất cả' && room.subject && room.subject.toLowerCase() !== filterSubject.toLowerCase()) return false;
+                  if (!isGradeMatching(room.grade, filterGrade)) return false;
+                  if (!isClassMatching(room.classInfo, filterClass)) return false;
+                  if (!isSubjectMatching(room.subject, filterSubject)) return false;
                   return true;
                 });
                 if (filteredRooms.length === 0) return null;
