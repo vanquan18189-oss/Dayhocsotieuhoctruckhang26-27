@@ -1,0 +1,8 @@
+{
+  "name": "Remix EduPlay Pro - Hệ Thống Quản Lý Dạy Và Học 345",
+  "description": "Hệ thống quản lý dạy và học EduPlay Pro với 7 phân hệ chuyên sâu: Tổng quan, Bài giảng 5E, Quản lý đề kiểm tra, Bài tập, Ngân hàng câu hỏi, Trò chơi học tập và Quản lý người dùng tích hợp Trợ lý AI sư phạm.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
