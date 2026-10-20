@@ -1783,7 +1783,15 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
                 );
                 const count = uniqueStudentKeys.size;
 
+                const globalSubRef = doc(db, 'exam_submissions', `${examId}_${effectiveStudentSddcn}`);
+
                 transaction.set(subDocRef, {
+                  ...fullExamRecord,
+                  examId,
+                  updatedAt: new Date().toISOString()
+                }, { merge: true });
+
+                transaction.set(globalSubRef, {
                   ...fullExamRecord,
                   examId,
                   updatedAt: new Date().toISOString()

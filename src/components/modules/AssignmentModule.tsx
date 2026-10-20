@@ -54,7 +54,7 @@ import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, QUESTION_TYPES, normal
 import { useClassesList } from '../../services/classStorageService';
 import { HomeworkAssignment, AssignmentSubmission, UserRole, QuestionItem } from '../../types';
 import { runSaveOperation } from '../../utils/saveUtils';
-import { saveAssignmentSubmission, subscribeSubmissions } from '../../services/submissionService';
+import { saveAssignmentSubmission, subscribeSubmissions, subscribeAllAssignmentSubmissions } from '../../services/submissionService';
 import { gradeSubmissionAI } from '../../services/geminiService';
 import { exportAssignmentResultsExcel } from '../../services/excelService';
 import { ManualQuestionBankModal } from './ManualQuestionBankModal';
@@ -250,16 +250,25 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     return () => unsub();
   }, [detailAssignment?.id]);
 
-  // Listener for local storage updates & custom window events
+  // Real-time Firestore map for all assignment submissions (key: assignmentId -> Set<studentKey>)
+  const [liveAssignmentSubmissionsMap, setLiveAssignmentSubmissionsMap] = useState<Map<string, Set<string>>>(new Map());
+
+  // Listener for local storage updates, Firestore live snapshot & custom window events
   const [submissionSyncTick, setSubmissionSyncTick] = useState(0);
 
   useEffect(() => {
+    const unsubFirestore = subscribeAllAssignmentSubmissions((map) => {
+      setLiveAssignmentSubmissionsMap(map);
+      setSubmissionSyncTick(prev => prev + 1);
+    });
+
     const handleSubmissionsUpdated = () => {
       setSubmissionSyncTick(prev => prev + 1);
     };
     window.addEventListener('eduplay_student_submissions_updated', handleSubmissionsUpdated);
     window.addEventListener('storage', handleSubmissionsUpdated);
     return () => {
+      unsubFirestore();
       window.removeEventListener('eduplay_student_submissions_updated', handleSubmissionsUpdated);
       window.removeEventListener('storage', handleSubmissionsUpdated);
     };
@@ -268,10 +277,17 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
   // Helper calculating authentic unique submitted student count
   const getAssignmentSubmissionCount = useCallback((as: HomeworkAssignment): number => {
     if (!as) return 0;
-    const subs = Array.isArray(as.submissions) ? as.submissions : [];
     const uniqueStudentKeys = new Set<string>();
+
+    const targetAsId = String(as.id || '').trim().toLowerCase();
+    const liveSet = liveAssignmentSubmissionsMap.get(targetAsId);
+    if (liveSet) {
+      liveSet.forEach(k => uniqueStudentKeys.add(k));
+    }
+
+    const subs = Array.isArray(as.submissions) ? as.submissions : [];
     subs.forEach((s: any) => {
-      const k = (s.studentId || s.maHs || s.studentName || '').trim().toLowerCase();
+      const k = (s.sddcn || s.studentId || s.maHs || s.studentName || '').trim().toLowerCase();
       if (k) uniqueStudentKeys.add(k);
     });
 
@@ -281,11 +297,15 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
       });
     }
 
-    if (uniqueStudentKeys.size > 0) return uniqueStudentKeys.size;
-    if (typeof as.submittedCount === 'number') return as.submittedCount;
-    if (typeof as.completedCount === 'number') return as.completedCount;
-    return 0;
-  }, []);
+    const computed = uniqueStudentKeys.size;
+    const explicit = Math.max(
+      typeof as.submittedCount === 'number' ? as.submittedCount : 0,
+      typeof as.completedCount === 'number' ? as.completedCount : 0,
+      typeof (as as any).submissionsCount === 'number' ? (as as any).submissionsCount : 0
+    );
+
+    return Math.max(computed, explicit);
+  }, [liveAssignmentSubmissionsMap]);
 
   // Dynamic tracking students derived from detailAssignment submissions and class roster
   const trackingStudentsList = useMemo(() => {
@@ -1004,6 +1024,8 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     setOpenActionMenuId(null);
   };
 
+  const [isSubmittingHomework, setIsSubmittingHomework] = useState<boolean>(false);
+
   // Student submission handler
   const handleStudentSubmit = async () => {
     if (!solvingAssignment || !studentContent.trim()) return;
@@ -1018,19 +1040,23 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     };
 
     try {
-      await runSaveOperation(async () => {
-        await saveAssignmentSubmission(solvingAssignment.id, newSubmission);
-      }, {
-        timeoutMs: 10000,
-        errorMessage: 'Lỗi khi nộp bài. Vui lòng kiểm tra kết nối mạng và thử lại.'
-      });
+      await runSaveOperation(
+        async () => {
+          await saveAssignmentSubmission(solvingAssignment.id, newSubmission);
+        },
+        isSubmittingHomework,
+        setIsSubmittingHomework,
+        {
+          timeoutMs: 10000
+        }
+      );
       
       setSolvingAssignment(null);
       setStudentContent('');
       showToast('Nộp bài tập thành công! Giáo viên và Gemini AI sẽ chấm bài sớm.');
     } catch (err: any) {
       console.error('Nộp bài thất bại:', err);
-      showToast(`Nộp bài thất bại: ${err.message || 'Lỗi không xác định'}`, 'error');
+      showToast(`Nộp bài thất bại: ${err?.message || 'Lỗi không xác định'}`);
     }
   };
 

@@ -4,6 +4,7 @@ import { formatScore, formatTotalScore, roundTotalScore, isSubjectWithScore, get
 import { getTeachersFromLocalStorage, resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
 import { getStudentsFromLocalStorage, getClassStudentCount, deleteStudentFromClass } from '../../services/studentStorageService';
 import { deleteAllExamsFromFirestore } from '../../services/examStorageService';
+import { subscribeAllExamSubmissions } from '../../services/submissionService';
 import { auth } from '../../services/firebase';
 import { collection, onSnapshot, doc, getDocFromServer } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
@@ -573,8 +574,16 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   const [trackingActionMenuId, setTrackingActionMenuId] = useState<string | null>(null);
   const [submissionsVersion, setSubmissionsVersion] = useState<number>(0);
 
+  // Real-time Firestore map for all exam submissions (key: examId -> Set<studentKey>)
+  const [liveExamSubmissionsMap, setLiveExamSubmissionsMap] = useState<Map<string, Set<string>>>(new Map());
+
   // Real-time synchronization when student submits exam
   useEffect(() => {
+    const unsubFirestore = subscribeAllExamSubmissions((map) => {
+      setLiveExamSubmissionsMap(map);
+      setSubmissionsVersion(prev => prev + 1);
+    });
+
     const handleSubmissionsUpdated = () => {
       setSubmissionsVersion(prev => prev + 1);
     };
@@ -582,6 +591,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     window.addEventListener('eduplay_exam_submissions_updated', handleSubmissionsUpdated);
     window.addEventListener('storage', handleSubmissionsUpdated);
     return () => {
+      unsubFirestore();
       window.removeEventListener('eduplay_student_submissions_updated', handleSubmissionsUpdated);
       window.removeEventListener('eduplay_exam_submissions_updated', handleSubmissionsUpdated);
       window.removeEventListener('storage', handleSubmissionsUpdated);
@@ -1609,45 +1619,46 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   }, []);
 
   const getExamSubmissionCount = useCallback((exam: ExamPaper): number => {
+    if (!exam) return 0;
     const subMap = new Map<string, boolean>();
     const targetExamId = String(exam.id || '').trim().toLowerCase();
     const targetOriginalId = String(exam.originalExamId || '').trim().toLowerCase();
 
-    const processSub = (item: any) => {
-      if (!item) return;
-      const subExamId = String(item.examId || item.id || item.exam?.id || '').trim().toLowerCase();
-      const isMatch = Boolean(subExamId && (subExamId === targetExamId || (targetOriginalId && subExamId === targetOriginalId)));
-      if (!isMatch) return;
-      const rawScore = item.score !== undefined ? item.score : (item.totalScore !== undefined ? item.totalScore : null);
-      let numScore: number | null = null;
-      if (typeof rawScore === 'number') {
-        numScore = rawScore;
-      } else if (typeof rawScore === 'string') {
-        const matchNum = rawScore.match(/([\d\.]+)/);
-        numScore = matchNum ? parseFloat(matchNum[1]) : (isNaN(Number(rawScore)) ? null : Number(rawScore));
+    // 1. Process live Firestore exam submissions map
+    const liveSet1 = liveExamSubmissionsMap.get(targetExamId);
+    if (liveSet1) {
+      liveSet1.forEach(k => subMap.set(k, true));
+    }
+    if (targetOriginalId) {
+      const liveSet2 = liveExamSubmissionsMap.get(targetOriginalId);
+      if (liveSet2) {
+        liveSet2.forEach(k => subMap.set(k, true));
       }
-      if (numScore === null && item.answers === undefined && item.status !== 'submitted') return;
-
-      const studentId = item.studentId || item.maHs || item.studentCode || item.studentName || item.name || 'unknown';
-      subMap.set(String(studentId).toLowerCase(), true);
-    };
-
-    if (Array.isArray(exam.submissions)) {
-      exam.submissions.forEach(sub => {
-        const subExamId = String(sub.examId || sub.id || sub.exam?.id || '').trim().toLowerCase();
-        if (!subExamId || subExamId === targetExamId || (targetOriginalId && subExamId === targetOriginalId)) {
-          processSub({ ...sub, examId: exam.id });
-        }
-      });
     }
 
+    const processSub = (item: any) => {
+      if (!item) return;
+      const explicitExamId = String(item.examId || item.targetExamId || item.targetId || '').trim().toLowerCase();
+      if (explicitExamId && explicitExamId !== targetExamId && (!targetOriginalId || explicitExamId !== targetOriginalId)) {
+        return;
+      }
+      const studentId = (item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.studentName || item.name || 'unknown').toString().trim().toLowerCase();
+      subMap.set(studentId, true);
+    };
+
+    // 2. Scan exam.submissions array on the exam document
+    if (Array.isArray(exam.submissions)) {
+      exam.submissions.forEach(sub => processSub(sub));
+    }
+
+    // 3. Scan LocalStorage caches
     if (typeof window !== 'undefined') {
       try {
         const examSubsRaw = localStorage.getItem(`eduplay_exam_subs_${exam.id}`);
         if (examSubsRaw) {
           const examSubs = JSON.parse(examSubsRaw);
           if (Array.isArray(examSubs)) {
-            examSubs.forEach(sub => processSub({ ...sub, examId: exam.id }));
+            examSubs.forEach(sub => processSub(sub));
           }
         }
       } catch {}
@@ -1678,8 +1689,15 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       } catch {}
     }
 
-    return subMap.size;
-  }, []);
+    const computedCount = subMap.size;
+    const explicitCount = Math.max(
+      typeof exam.submissionsCount === 'number' ? exam.submissionsCount : 0,
+      typeof (exam as any).completedCount === 'number' ? (exam as any).completedCount : 0,
+      typeof (exam as any).submittedCount === 'number' ? (exam as any).submittedCount : 0
+    );
+
+    return Math.max(computedCount, explicitCount);
+  }, [liveExamSubmissionsMap]);
 
   const allExamsCount = normalizedExams.length;
   const myExamsCount = normalizedExams.filter(e => isMyExam(e)).length;
