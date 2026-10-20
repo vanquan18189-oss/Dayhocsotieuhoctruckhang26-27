@@ -53,6 +53,8 @@ import {
 import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, QUESTION_TYPES, normalizeQuestionType, getDefaultAnswerSchemaByType, sanitizeQuestionForFirestore, getQuestionTypeLabel, isGradeMatching, extractGradeDigit, sanitizeOrNormalizeQuestion, isMatchingQuestion } from '../../lib/constants';
 import { useClassesList } from '../../services/classStorageService';
 import { HomeworkAssignment, AssignmentSubmission, UserRole, QuestionItem } from '../../types';
+import { runSaveOperation } from '../../utils/saveUtils';
+import { saveAssignmentSubmission, subscribeSubmissions } from '../../services/submissionService';
 import { gradeSubmissionAI } from '../../services/geminiService';
 import { exportAssignmentResultsExcel } from '../../services/excelService';
 import { ManualQuestionBankModal } from './ManualQuestionBankModal';
@@ -204,6 +206,14 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
 
   // Selected assignment for Detail Modal / Submissions
   const [detailAssignment, setDetailAssignment] = useState<HomeworkAssignment | null>(null);
+  const [assignmentSubmissions, setAssignmentSubmissions] = useState<AssignmentSubmission[]>([]);
+
+  useEffect(() => {
+    if (!detailAssignment) return;
+    return subscribeSubmissions(detailAssignment.id, (subs) => {
+      setAssignmentSubmissions(subs);
+    });
+  }, [detailAssignment?.id]);
 
   // Tracking modal states
   const [trackingTab, setTrackingTab] = useState<'all' | 'needs_action' | 'support'>('all');
@@ -995,9 +1005,9 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
   };
 
   // Student submission handler
-  const handleStudentSubmit = () => {
+  const handleStudentSubmit = async () => {
     if (!solvingAssignment || !studentContent.trim()) return;
-
+    
     const newSubmission: AssignmentSubmission = {
       id: `sub-${Date.now()}`,
       studentId: currentUserId,
@@ -1007,16 +1017,21 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
       status: 'pending'
     };
 
-    const updated: HomeworkAssignment = {
-      ...solvingAssignment,
-      completedCount: (solvingAssignment.completedCount || 0) + 1,
-      submissions: [newSubmission, ...solvingAssignment.submissions]
-    };
-
-    onSaveAssignment(updated);
-    setSolvingAssignment(null);
-    setStudentContent('');
-    showToast('Nộp bài tập thành công! Giáo viên và Gemini AI sẽ chấm bài sớm.');
+    try {
+      await runSaveOperation(async () => {
+        await saveAssignmentSubmission(solvingAssignment.id, newSubmission);
+      }, {
+        timeoutMs: 10000,
+        errorMessage: 'Lỗi khi nộp bài. Vui lòng kiểm tra kết nối mạng và thử lại.'
+      });
+      
+      setSolvingAssignment(null);
+      setStudentContent('');
+      showToast('Nộp bài tập thành công! Giáo viên và Gemini AI sẽ chấm bài sớm.');
+    } catch (err: any) {
+      console.error('Nộp bài thất bại:', err);
+      showToast(`Nộp bài thất bại: ${err.message || 'Lỗi không xác định'}`, 'error');
+    }
   };
 
   // AI Grading
