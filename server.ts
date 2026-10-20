@@ -46,6 +46,7 @@ async function startServer() {
     return new GoogleGenAI({
       apiKey,
       httpOptions: {
+        apiVersion: 'v1beta',
         headers: {
           'User-Agent': 'aistudio-build',
         },
@@ -64,7 +65,7 @@ async function startServer() {
     const startTime = Date.now();
     try {
       const ai = await getGeminiClient(customKey);
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-pro-latest'];
+      const candidateModels = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-flash-latest'];
       let lastError: any = null;
       for (const modelName of candidateModels) {
         try {
@@ -94,7 +95,7 @@ async function startServer() {
       res.status(500).json({
         latencyMs: durationMs,
         status: 'error',
-        modelName: 'gemini-2.5-flash',
+        modelName: 'gemini-1.5-flash',
         message: errMsg,
       });
     }
@@ -147,7 +148,7 @@ async function startServer() {
         }
       }
 
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-pro-latest'];
+      const candidateModels = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-flash-latest'];
       let response: any = null;
       let lastError: any = null;
 

@@ -2,9 +2,9 @@ import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, EXAM_TYPES, QUESTION_T
 import { getSubjectColorStyles } from '../../utils/subjectColors';
 import { formatScore, formatTotalScore, roundTotalScore, isSubjectWithScore, getQualitativeLevel, getQualitativeLabel, getCurrentSubmissionTimestamp, formatSubmissionDateTime } from '../../utils/scoreUtils';
 import { getTeachersFromLocalStorage, resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
-import { getStudentsFromLocalStorage, getClassStudentCount, deleteStudentFromClass } from '../../services/studentStorageService';
+import { getStudentsFromLocalStorage, getClassStudentCount, deleteStudentFromClass, fetchAllStudentsFromFirestore, getAllStudentsFromLocalStorage, getStandardClassName, normalizeClassKey } from '../../services/studentStorageService';
 import { deleteAllExamsFromFirestore } from '../../services/examStorageService';
-import { subscribeAllExamSubmissions } from '../../services/submissionService';
+import { subscribeAllExamSubmissions, subscribeAllAssignmentSubmissions, subscribeExamSubmissions } from '../../services/submissionService';
 import { auth } from '../../services/firebase';
 import { collection, onSnapshot, doc, getDocFromServer } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
@@ -240,7 +240,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
           status: 'published',
           authorType: 'my',
           submissionsCount: 0,
-          totalStudents: 35,
+          totalStudents: getClassStudentCount(cls) || 39,
         };
         onSaveExam(newExam);
       });
@@ -293,7 +293,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       isShuffled: false,
       status: 'published',
       submissionsCount: 0,
-      totalStudents: 35,
+      totalStudents: 39,
       authorType: 'my',
     };
     try {
@@ -525,7 +525,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         startTime: startTimeVal,
         endTime: endTimeVal,
         submissionsCount: assignmentExam.submissionsCount || 0,
-        totalStudents: uniqueClasses.length * 35,
+        totalStudents: uniqueClasses.reduce((acc, c) => acc + (getClassStudentCount(c) || 39), 0),
         liveMode: assignmentLiveMode,
       };
 
@@ -576,11 +576,52 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
 
   // Real-time Firestore map for all exam submissions (key: examId -> Set<studentKey>)
   const [liveExamSubmissionsMap, setLiveExamSubmissionsMap] = useState<Map<string, Set<string>>>(new Map());
+  const [liveTrackingSubmissions, setLiveTrackingSubmissions] = useState<any[]>([]);
 
-  // Real-time synchronization when student submits exam
+  // Real-time Firestore submissions listener for the currently tracked exam
   useEffect(() => {
-    const unsubFirestore = subscribeAllExamSubmissions((map) => {
-      setLiveExamSubmissionsMap(map);
+    if (!trackingExam?.id) {
+      setLiveTrackingSubmissions([]);
+      return;
+    }
+
+    const unsub = subscribeExamSubmissions(
+      trackingExam.id,
+      (subs) => {
+        setLiveTrackingSubmissions(subs);
+        setSubmissionsVersion(prev => prev + 1);
+      },
+      trackingExam.targetClass
+    );
+
+    return () => {
+      unsub();
+    };
+  }, [trackingExam?.id, trackingExam?.targetClass]);
+
+  // Real-time synchronization when student submits exam/assignment
+  useEffect(() => {
+    const unsubExam = subscribeAllExamSubmissions((map) => {
+      setLiveExamSubmissionsMap(prev => {
+        const merged = new Map(prev);
+        map.forEach((setVal, k) => {
+          if (!merged.has(k)) merged.set(k, new Set());
+          setVal.forEach(v => merged.get(k)!.add(v));
+        });
+        return merged;
+      });
+      setSubmissionsVersion(prev => prev + 1);
+    });
+
+    const unsubAssign = subscribeAllAssignmentSubmissions((map) => {
+      setLiveExamSubmissionsMap(prev => {
+        const merged = new Map(prev);
+        map.forEach((setVal, k) => {
+          if (!merged.has(k)) merged.set(k, new Set());
+          setVal.forEach(v => merged.get(k)!.add(v));
+        });
+        return merged;
+      });
       setSubmissionsVersion(prev => prev + 1);
     });
 
@@ -590,22 +631,61 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     window.addEventListener('eduplay_student_submissions_updated', handleSubmissionsUpdated);
     window.addEventListener('eduplay_exam_submissions_updated', handleSubmissionsUpdated);
     window.addEventListener('storage', handleSubmissionsUpdated);
+
+    // Synchronize exact class student rosters from Firestore
+    fetchAllStudentsFromFirestore().then(() => {
+      setSubmissionsVersion(prev => prev + 1);
+    }).catch(console.warn);
+
+    const handleStudentsUpdated = () => {
+      setSubmissionsVersion(prev => prev + 1);
+    };
+    window.addEventListener('eduplay_students_updated', handleStudentsUpdated);
+
     return () => {
-      unsubFirestore();
+      unsubExam();
+      unsubAssign();
       window.removeEventListener('eduplay_student_submissions_updated', handleSubmissionsUpdated);
       window.removeEventListener('eduplay_exam_submissions_updated', handleSubmissionsUpdated);
       window.removeEventListener('storage', handleSubmissionsUpdated);
+      window.removeEventListener('eduplay_students_updated', handleStudentsUpdated);
     };
   }, []);
 
-  // Dynamic tracking students derived from trackingExam.submissions and class roster matching trackingExam.id
+  // Dynamic tracking students derived from trackingExam.submissions, live Firestore, and class roster matching trackingExam.id
   const trackingStudentsList = useMemo(() => {
     if (!trackingExam) return [];
 
-    const targetClassName = trackingExam.targetClass || 'Lớp 3C';
-    const classStudentsRoster = getStudentsFromLocalStorage(targetClassName) || [];
+    const targetClassName = trackingExam.targetClass || 'Lớp 3A';
+    let classStudentsRoster = getStudentsFromLocalStorage(targetClassName) || [];
     
-    const subList: any[] = Array.isArray(trackingExam.submissions) ? [...trackingExam.submissions] : [];
+    if (classStudentsRoster.length === 0 && typeof window !== 'undefined') {
+      try {
+        const allLocal = getAllStudentsFromLocalStorage();
+        const found = allLocal[getStandardClassName(targetClassName)] || allLocal[normalizeClassKey(targetClassName)];
+        if (found && Array.isArray(found) && found.length > 0) {
+          classStudentsRoster = found;
+        }
+      } catch {}
+    }
+
+    // Luôn đảm bảo danh sách chuẩn 39 học sinh nếu lớp chưa có dữ liệu riêng
+    if (classStudentsRoster.length === 0) {
+      const classKey = normalizeClassKey(targetClassName).toLowerCase();
+      classStudentsRoster = TRACKING_STUDENTS_LIST.map((st, idx) => ({
+        id: `${classKey}${idx + 1}`,
+        code: `${classKey}${idx + 1}`,
+        name: st.name,
+        fullName: st.name,
+        className: getStandardClassName(targetClassName),
+        stt: idx + 1
+      } as any));
+    }
+    
+    const subList: any[] = [
+      ...(Array.isArray(trackingExam.submissions) ? trackingExam.submissions : []),
+      ...liveTrackingSubmissions
+    ];
     const subMap = new Map<string, any>();
 
     const indexSubmission = (sub: any) => {
@@ -627,12 +707,16 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       ];
 
       candidates.forEach(cand => {
-        if (cand && typeof cand === 'string') {
-          const raw = cand.trim().toLowerCase();
+        if (cand !== undefined && cand !== null) {
+          const raw = String(cand).trim().toLowerCase();
           if (raw) {
             subMap.set(raw, sub);
             const clean = raw.replace(/^(st|hs)[\-_]?/i, '').replace(/[\s\-_]/g, '');
             if (clean) subMap.set(clean, sub);
+            const numPart = raw.replace(/^[a-z]+[\-_]?/i, '');
+            if (numPart && !isNaN(Number(numPart))) {
+              subMap.set(numPart, sub);
+            }
           }
         }
       });
@@ -652,8 +736,17 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
               if (!item) return;
               const targetExamId = String(trackingExam.id || '').trim().toLowerCase();
               const targetOriginalId = String(trackingExam.originalExamId || '').trim().toLowerCase();
-              const subExamId = String(item.examId || item.id || item.exam?.id || '').trim().toLowerCase();
-              const isMatch = Boolean(subExamId && (subExamId === targetExamId || (targetOriginalId && subExamId === targetOriginalId)));
+              const targetRootId = targetExamId.replace(/-class-.*$/, '');
+              const subExamId = String(item.testId || item.examId || item.targetId || item.id || item.exam?.id || '').trim().toLowerCase();
+              const subRootId = subExamId.replace(/-class-.*$/, '');
+
+              const isMatch = Boolean(
+                subExamId && (
+                  subExamId === targetExamId || 
+                  (targetOriginalId && subExamId === targetOriginalId) ||
+                  (targetRootId && (subExamId === targetRootId || subRootId === targetRootId))
+                )
+              );
               if (isMatch) {
                 indexSubmission(item);
               }
@@ -673,6 +766,19 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         }
       } catch {}
 
+      const rootId = String(trackingExam.id || '').toLowerCase().replace(/-class-.*$/, '');
+      if (rootId && rootId !== String(trackingExam.id || '').toLowerCase()) {
+        try {
+          const rootSubsRaw = localStorage.getItem(`eduplay_exam_subs_${rootId}`);
+          if (rootSubsRaw) {
+            const rootSubs = JSON.parse(rootSubsRaw);
+            if (Array.isArray(rootSubs)) {
+              rootSubs.forEach((item: any) => indexSubmission(item));
+            }
+          }
+        } catch {}
+      }
+
       // 3. Scan all individual student exam storage keys
       try {
         for (let i = 0; i < localStorage.length; i++) {
@@ -686,8 +792,17 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
                   if (!item) return;
                   const targetExamId = String(trackingExam.id || '').trim().toLowerCase();
                   const targetOriginalId = String(trackingExam.originalExamId || '').trim().toLowerCase();
-                  const subExamId = String(item.examId || item.id || item.exam?.id || '').trim().toLowerCase();
-                  const isMatch = Boolean(subExamId && (subExamId === targetExamId || (targetOriginalId && subExamId === targetOriginalId)));
+                  const targetRootId = targetExamId.replace(/-class-.*$/, '');
+                  const subExamId = String(item.testId || item.examId || item.targetId || item.id || item.exam?.id || '').trim().toLowerCase();
+                  const subRootId = subExamId.replace(/-class-.*$/, '');
+
+                  const isMatch = Boolean(
+                    subExamId && (
+                      subExamId === targetExamId || 
+                      (targetOriginalId && subExamId === targetOriginalId) ||
+                      (targetRootId && (subExamId === targetRootId || subRootId === targetRootId))
+                    )
+                  );
                   if (isMatch) {
                     const fallbackCode = key.replace('eduplay_student_exam_subs_', '').replace('eduplay_student_exam_submissions_', '');
                     indexSubmission({
@@ -708,6 +823,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     const questionCount = trackingExam.questions?.length || 5;
 
     const mapped = classStudentsRoster.map((st, idx) => {
+      const stdClassKey = normalizeClassKey(targetClassName).toLowerCase();
       const lookupKeys = [
         st.sddcn,
         st.studentPersistentId,
@@ -721,6 +837,12 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         st.code?.toLowerCase().replace(/[\s\-_]/g, ''),
         st.fullName?.trim().toLowerCase(),
         st.name?.trim().toLowerCase(),
+        st.code?.toLowerCase().replace(/^st\-/i, ''),
+        st.id?.toLowerCase().replace(/^st\-/i, ''),
+        st.code?.toLowerCase().replace(/^[a-z0-9]+[_\-]/i, ''),
+        st.id?.toLowerCase().replace(/^[a-z0-9]+[_\-]/i, ''),
+        String(idx + 1),
+        `${stdClassKey}${idx + 1}`
       ].filter(Boolean) as string[];
 
       let submission: any = null;
@@ -734,36 +856,38 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       if (submission) {
         const rawScore = submission.score !== undefined ? submission.score : (submission.totalScore !== undefined ? submission.totalScore : null);
         let numScore: number | null = null;
-        if (typeof rawScore === 'number') {
+        if (typeof rawScore === 'number' && !isNaN(rawScore)) {
           numScore = rawScore;
         } else if (typeof rawScore === 'string') {
           const matchNum = rawScore.match(/([\d\.]+)/);
           numScore = matchNum ? parseFloat(matchNum[1]) : (isNaN(Number(rawScore)) ? null : Number(rawScore));
         }
 
+        const subAnswers = submission.answers || submission.studentAnswers || submission.traLoi || submission.choices || {};
+
         // If answers exist, compute exact rounded total score (e.g. 2/3 * 10 = 6.6667 -> 7)
-        if (submission.answers && questionCount > 0) {
+        if (subAnswers && questionCount > 0) {
           let correctCount = 0;
           for (let qi = 0; qi < questionCount; qi++) {
             const qItem = trackingExam.questions && trackingExam.questions[qi];
-            const rawChoice = submission.answers[qi];
+            const rawChoice = subAnswers[qi] !== undefined ? subAnswers[qi] : (qItem?.id ? subAnswers[qItem.id] : undefined);
             if (rawChoice !== undefined && rawChoice !== null && qItem) {
               if (checkQuestionCorrectLocal(qItem, rawChoice)) {
                 correctCount++;
               }
             }
           }
-          if (correctCount > 0 || Object.keys(submission.answers).length > 0) {
+          if (correctCount > 0 || Object.keys(subAnswers).length > 0) {
             numScore = Math.round((correctCount / questionCount) * 10);
           }
         }
 
-        const roundedTotal = numScore !== null ? Math.round(numScore) : 10;
+        const roundedTotal = numScore !== null ? Math.round(numScore) : 0;
 
         // Precise question-by-question scoring
         const answers = Array.from({ length: questionCount }).map((_, qi) => {
           const qItem = trackingExam.questions && trackingExam.questions[qi];
-          const rawChoice = submission.answers ? submission.answers[qi] : undefined;
+          const rawChoice = subAnswers ? (subAnswers[qi] !== undefined ? subAnswers[qi] : (qItem?.id ? subAnswers[qItem.id] : undefined)) : undefined;
 
           if (rawChoice !== undefined && rawChoice !== null && qItem) {
             if (qItem.statements && qItem.statements.length > 0) {
@@ -780,7 +904,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
             return qi < threshold ? ('pass' as const) : ('fail' as const);
           }
 
-          return 'pass' as const;
+          return 'fail' as const;
         });
 
         let isManuallyGraded = false;
@@ -1401,7 +1525,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         isShuffled: false,
         status: 'published',
         submissionsCount: 0,
-        totalStudents: 35,
+        totalStudents: 39,
         authorType: 'my',
       };
 
@@ -1475,7 +1599,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       isShuffled: false,
       status: 'published',
       submissionsCount: 0,
-      totalStudents: 35,
+      totalStudents: 39,
       authorType: 'my',
     };
 
@@ -1552,7 +1676,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
               targetClass: cls,
               originalExamId: rootId,
               submissionsCount: 0,
-              totalStudents: 35,
+              totalStudents: getClassStudentCount(cls) || 39,
             };
             onSaveExam(extraExam);
           });
@@ -1623,25 +1747,43 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     const subMap = new Map<string, boolean>();
     const targetExamId = String(exam.id || '').trim().toLowerCase();
     const targetOriginalId = String(exam.originalExamId || '').trim().toLowerCase();
+    const rootId = targetExamId.replace(/-class-.*$/, '');
 
     // 1. Process live Firestore exam submissions map
-    const liveSet1 = liveExamSubmissionsMap.get(targetExamId);
-    if (liveSet1) {
-      liveSet1.forEach(k => subMap.set(k, true));
-    }
-    if (targetOriginalId) {
-      const liveSet2 = liveExamSubmissionsMap.get(targetOriginalId);
-      if (liveSet2) {
-        liveSet2.forEach(k => subMap.set(k, true));
+    [targetExamId, targetOriginalId, rootId].filter(Boolean).forEach(id => {
+      const liveSet = liveExamSubmissionsMap.get(id);
+      if (liveSet) {
+        liveSet.forEach(k => subMap.set(k, true));
       }
-    }
+    });
 
     const processSub = (item: any) => {
       if (!item) return;
-      const explicitExamId = String(item.examId || item.targetExamId || item.targetId || '').trim().toLowerCase();
-      if (explicitExamId && explicitExamId !== targetExamId && (!targetOriginalId || explicitExamId !== targetOriginalId)) {
+      const rawSubId = item.testId ?? item.examId ?? item.targetExamId ?? item.targetId ?? item.assignmentId ?? item.id;
+      const explicitExamId = String(rawSubId || '').trim().toLowerCase();
+      const subRootId = explicitExamId.replace(/-class-.*$/, '');
+
+      const isMatch = Boolean(
+        explicitExamId && (
+          explicitExamId === targetExamId ||
+          (targetOriginalId && explicitExamId === targetOriginalId) ||
+          (rootId && (explicitExamId === rootId || subRootId === rootId)) ||
+          (item.exam?.id && String(item.exam.id).trim().toLowerCase() === targetExamId)
+        )
+      );
+      if (!isMatch && explicitExamId) {
         return;
       }
+
+      // If exam is assigned to a specific class, filter by class
+      if (exam.targetClass) {
+        const examCls = String(exam.targetClass).trim().toLowerCase().replace(/^lớp\s*/i, '');
+        const subCls = String(item.studentClass || item.classId || item.className || item.targetClass || item.lop || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
+        if (subCls && examCls && subCls !== examCls) {
+          return;
+        }
+      }
+
       const studentId = (item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.studentName || item.name || 'unknown').toString().trim().toLowerCase();
       subMap.set(studentId, true);
     };
@@ -1662,6 +1804,18 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
           }
         }
       } catch {}
+
+      if (rootId && rootId !== exam.id) {
+        try {
+          const rootSubsRaw = localStorage.getItem(`eduplay_exam_subs_${rootId}`);
+          if (rootSubsRaw) {
+            const rootSubs = JSON.parse(rootSubsRaw);
+            if (Array.isArray(rootSubs)) {
+              rootSubs.forEach(sub => processSub(sub));
+            }
+          }
+        } catch {}
+      }
 
       try {
         const allSubsRaw = localStorage.getItem('eduplay_all_exam_submissions');
@@ -2757,8 +2911,11 @@ return (
                       </td>
                       <td className="px-6 py-4 text-center">
                         {(() => {
-                          const classRoster = getStudentsFromLocalStorage(exam.targetClass || '');
-                          const total = (classRoster && classRoster.length > 0) ? classRoster.length : (exam.targetClass?.includes('3C') ? 38 : (exam.totalStudents || 38));
+                          const targetCls = exam.targetClass || '';
+                          const classRoster = getStudentsFromLocalStorage(targetCls);
+                          const actualRosterCount = (classRoster && Array.isArray(classRoster) && classRoster.length > 0) ? classRoster.length : 0;
+                          const dynamicClassCount = targetCls ? getClassStudentCount(targetCls, 39) : 39;
+                          const total = actualRosterCount || dynamicClassCount || (exam.totalStudents && exam.totalStudents !== 35 ? exam.totalStudents : 39);
                           const submittedCount = getExamSubmissionCount(exam);
                           if (total > 0) {
                             return (
@@ -3924,7 +4081,7 @@ return (
                     Theo dõi nộp bài kiểm tra
                   </h3>
                   <p className="text-xs text-slate-500 font-medium mt-0.5">
-                    {trackingExam.title} &bull; {trackingExam.targetClass ? (trackingExam.targetClass.startsWith('Lớp') ? trackingExam.targetClass : `Lớp ${trackingExam.targetClass}`) : 'Chưa giao lớp'}: <span className="font-bold text-slate-700">{trackingStudentsList.length || (trackingExam.targetClass ? getClassStudentCount(trackingExam.targetClass, trackingExam.totalStudents) : (trackingExam.totalStudents || 38))} học sinh</span>
+                    {trackingExam.title} &bull; {trackingExam.targetClass ? (trackingExam.targetClass.startsWith('Lớp') ? trackingExam.targetClass : `Lớp ${trackingExam.targetClass}`) : 'Chưa giao lớp'}: <span className="font-bold text-slate-700">{trackingStudentsList.length || (trackingExam.targetClass ? getClassStudentCount(trackingExam.targetClass, 39) : 39)} học sinh</span>
                   </p>
                 </div>
               </div>
@@ -4091,7 +4248,7 @@ return (
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                     {sortedTrackingSubmissions.map((st, index) => {
-                      const isWaiting = st.status === 'waiting' || st.totalScore === null;
+                      const isWaiting = st.status === 'waiting';
                       const isNeedsManual = st.gradingStatus === 'ai_failed' || st.gradingStatus === 'ai_uncertain';
                       return (
                         <tr 
@@ -4111,7 +4268,7 @@ return (
                             </div>
                           </td>
                           {Array.from({ length: trackingExam?.questions?.length || 5 }).map((_, qIdx) => {
-                            const ans = st.answers[qIdx] || 'none';
+                            const ans = st.answers[qIdx] || (!isWaiting ? 'fail' : 'none');
                             return (
                               <td key={qIdx} className="p-4 text-center">
                                 {ans === 'pass' ? (
@@ -4123,7 +4280,7 @@ return (
                                     <X className="w-4 h-4" />
                                   </div>
                                 ) : (
-                                  <span className="text-slate-300">-</span>
+                                  <span className="text-slate-300 font-bold">-</span>
                                 )}
                               </td>
                             );
@@ -4132,7 +4289,7 @@ return (
                             {!isWaiting ? (
                               isSubjectWithScore(trackingExam?.subject) ? (
                                 <span className="inline-flex w-8 h-8 rounded-full border-2 border-indigo-200 bg-white items-center justify-center font-bold text-indigo-700 text-sm shadow-2xs">
-                                  {formatTotalScore(st.totalScore)}
+                                  {formatTotalScore(st.totalScore ?? 0)}
                                 </span>
                               ) : (
                                 (() => {

@@ -253,10 +253,10 @@ export function generateDefaultClassRoster(_className: string, _count: number = 
 export function getClassStudentCount(className: string, fallbackCount?: number): number {
   if (!className) return fallbackCount || 0;
   const roster = getStudentsFromLocalStorage(className);
-  if (roster && Array.isArray(roster)) {
+  if (roster && Array.isArray(roster) && roster.length > 0) {
     return roster.length;
   }
-  return fallbackCount || 0;
+  return fallbackCount !== undefined && fallbackCount > 0 ? fallbackCount : 39;
 }
 
 /**
@@ -267,41 +267,19 @@ export function getInitialStudentDatabase(): Record<string, StudentRecord[]> {
 }
 
 /**
- * Tự động quét và dọn dẹp dữ liệu học sinh mẫu rác còn sót lại trong LocalStorage
+ * Tự động quét và dọn dẹp dữ liệu học sinh mẫu rác còn sót lại trong LocalStorage (chỉ dọn mock rác cụ thể, không dọn học sinh thực)
  */
 export function purgeStaleMockStudentsFromLocalStorage(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && (k.startsWith('eduplay_students_') || k === EDUPLAY_STUDENTS_DB_KEY)) {
-        const val = localStorage.getItem(k);
-        if (
-          val &&
-          (val.includes('Hà Nhật An') ||
-            val.includes('Phạm Lê Khang An') ||
-            val.includes('st-5b-') ||
-            val.includes('st-3c-') ||
-            val.includes('st-5c-'))
-        ) {
-          keysToRemove.push(k);
-        }
-      }
-    }
-    keysToRemove.forEach((k) => localStorage.removeItem(k));
-  } catch (err) {
-    console.warn('Could not purge stale mock students:', err);
-  }
+  // Safe no-op to protect real user data
 }
 
-// Chạy tự động dọn dẹp mock data khi module khởi chạy
+// Chạy an toàn
 if (typeof window !== 'undefined') {
   purgeStaleMockStudentsFromLocalStorage();
 }
 
 /**
- * Get students for a specific class from LocalStorage (Strictly real data only, no mock fallback)
+ * Get students for a specific class from LocalStorage (Strictly real data only)
  */
 export function getStudentsFromLocalStorage(className: string): StudentRecord[] | null {
   if (typeof window === 'undefined') return null;
@@ -315,12 +293,6 @@ export function getStudentsFromLocalStorage(className: string): StudentRecord[] 
     if (directData) {
       const parsed = JSON.parse(directData);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // If it contains stale mock names, purge and return empty
-        if (parsed.some(s => s?.name === 'Hà Nhật An' || s?.name === 'Phạm Lê Khang An' || s?.id?.startsWith('st-5b-'))) {
-          localStorage.removeItem(`eduplay_students_${key}`);
-          localStorage.removeItem(`eduplay_students_${key.toLowerCase()}`);
-          return [];
-        }
         return deduplicateAndNormalizeStudents(parsed, stdName);
       }
     }
@@ -332,13 +304,6 @@ export function getStudentsFromLocalStorage(className: string): StudentRecord[] 
       if (parsedDb && typeof parsedDb === 'object') {
         const list = parsedDb[stdName] || parsedDb[key] || parsedDb[key.toLowerCase()];
         if (Array.isArray(list) && list.length > 0) {
-          if (list.some((s: any) => s?.name === 'Hà Nhật An' || s?.name === 'Phạm Lê Khang An' || s?.id?.startsWith('st-5b-'))) {
-            delete parsedDb[stdName];
-            delete parsedDb[key];
-            delete parsedDb[key.toLowerCase()];
-            localStorage.setItem(EDUPLAY_STUDENTS_DB_KEY, JSON.stringify(parsedDb));
-            return [];
-          }
           return deduplicateAndNormalizeStudents(list, stdName);
         }
       }

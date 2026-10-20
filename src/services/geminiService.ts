@@ -13,13 +13,27 @@ const STORAGE_KEYS = [
   'gemini_api_key'
 ];
 
-export const DEFAULT_MODEL = 'gemini-1.5-flash-latest';
-export const FALLBACK_MODEL = 'gemini-2.0-flash';
+export const DEFAULT_MODEL = 'gemini-1.5-flash';
+export const FALLBACK_MODEL = 'gemini-1.5-flash';
 export const GEMINI_MODEL = DEFAULT_MODEL;
 export const FALLBACK_GEMINI_MODELS = [
+  'gemini-1.5-flash',
   'gemini-1.5-flash-latest',
-  'gemini-2.0-flash'
+  'gemini-2.5-flash',
+  'gemini-flash-latest'
 ];
+
+export function createGeminiClient(apiKey: string): GoogleGenAI {
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      apiVersion: 'v1beta',
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
+}
 
 export const CACHED_WORKING_MODEL_KEY = 'eduplay_cached_working_model_v4';
 export const ADMIN_SELECTED_MODEL_KEY = 'eduplay_admin_selected_model_v4';
@@ -183,9 +197,9 @@ export function setStoredApiKey(key: string): void {
  * filtering for generateContent method and prioritizing flash models.
  */
 export async function getAvailableGeminiModels(apiKey: string): Promise<string[]> {
-  const defaultFallback = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash-latest', 'gemini-1.5-pro-latest'];
+  const defaultFallback = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-flash-latest'];
   try {
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = createGeminiClient(apiKey);
     const response: any = await ai.models.list();
     const candidateList: string[] = [];
 
@@ -350,7 +364,7 @@ export async function testGeminiLatency(
     };
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = createGeminiClient(apiKey);
 
   // 1. Try Admin / Cached Working Model first if present
   const activeInfo = getActiveModelInfo();
@@ -515,7 +529,7 @@ async function callGeminiApi(
     throw new Error('Chưa cấu hình Gemini API Key. Vui lòng bấm vào biểu tượng 🔑 (Cấu hình API Key) ở góc trên bên phải để bổ sung.');
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = createGeminiClient(apiKey);
 
   const config: any = {};
   if (systemInstruction) {

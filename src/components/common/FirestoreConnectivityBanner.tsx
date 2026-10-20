@@ -295,14 +295,25 @@ export const FirestoreConnectivityBanner: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={handleReconnect}
-            disabled={isReconnecting}
-            className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors active:scale-95 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isReconnecting ? 'animate-spin' : ''}`} />
-            <span>Khôi phục kết nối Firestore</span>
-          </button>
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleReconnect}
+              disabled={isReconnecting}
+              className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95 disabled:opacity-50 text-[11px]"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isReconnecting ? 'animate-spin' : ''}`} />
+              <span>Khôi phục kết nối</span>
+            </button>
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('eduplay_open_student_submissions_debug_modal'));
+              }}
+              className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95 shadow-sm text-[11px]"
+            >
+              <Database className="w-3.5 h-3.5 text-amber-300" />
+              <span>Kiểm tra bài nộp</span>
+            </button>
+          </div>
         </div>
       )}
     </>,

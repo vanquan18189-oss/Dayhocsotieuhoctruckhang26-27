@@ -54,7 +54,7 @@ import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, QUESTION_TYPES, normal
 import { useClassesList } from '../../services/classStorageService';
 import { HomeworkAssignment, AssignmentSubmission, UserRole, QuestionItem } from '../../types';
 import { runSaveOperation } from '../../utils/saveUtils';
-import { saveAssignmentSubmission, subscribeSubmissions, subscribeAllAssignmentSubmissions } from '../../services/submissionService';
+import { saveAssignmentSubmission, subscribeSubmissions, subscribeAllAssignmentSubmissions, subscribeAllExamSubmissions } from '../../services/submissionService';
 import { gradeSubmissionAI } from '../../services/geminiService';
 import { exportAssignmentResultsExcel } from '../../services/excelService';
 import { ManualQuestionBankModal } from './ManualQuestionBankModal';
@@ -64,7 +64,7 @@ import { getLocalCachedQuestions, QUESTIONS_CACHE_KEY, saveQuestionsBatchToFires
 import { useScoreSort } from '../../lib/useScoreSort';
 import { StudentAssignmentModule } from './StudentAssignmentModule';
 import { getCurrentTeacherProfile, resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
-import { getStudentsFromLocalStorage, getClassStudentCount } from '../../services/studentStorageService';
+import { getStudentsFromLocalStorage, getClassStudentCount, fetchAllStudentsFromFirestore, getAllStudentsFromLocalStorage, getStandardClassName, normalizeClassKey } from '../../services/studentStorageService';
 import { auth, db } from '../../services/firebase';
 import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { trackedSetDoc } from '../../services/firestoreWriteTracker';
@@ -257,8 +257,27 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
   const [submissionSyncTick, setSubmissionSyncTick] = useState(0);
 
   useEffect(() => {
-    const unsubFirestore = subscribeAllAssignmentSubmissions((map) => {
-      setLiveAssignmentSubmissionsMap(map);
+    const unsubAssign = subscribeAllAssignmentSubmissions((map) => {
+      setLiveAssignmentSubmissionsMap(prev => {
+        const merged = new Map(prev);
+        map.forEach((setVal, k) => {
+          if (!merged.has(k)) merged.set(k, new Set());
+          setVal.forEach(v => merged.get(k)!.add(v));
+        });
+        return merged;
+      });
+      setSubmissionSyncTick(prev => prev + 1);
+    });
+
+    const unsubExam = subscribeAllExamSubmissions((map) => {
+      setLiveAssignmentSubmissionsMap(prev => {
+        const merged = new Map(prev);
+        map.forEach((setVal, k) => {
+          if (!merged.has(k)) merged.set(k, new Set());
+          setVal.forEach(v => merged.get(k)!.add(v));
+        });
+        return merged;
+      });
       setSubmissionSyncTick(prev => prev + 1);
     });
 
@@ -266,11 +285,25 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
       setSubmissionSyncTick(prev => prev + 1);
     };
     window.addEventListener('eduplay_student_submissions_updated', handleSubmissionsUpdated);
+    window.addEventListener('eduplay_exam_submissions_updated', handleSubmissionsUpdated);
     window.addEventListener('storage', handleSubmissionsUpdated);
+
+    fetchAllStudentsFromFirestore().then(() => {
+      setSubmissionSyncTick(prev => prev + 1);
+    }).catch(console.warn);
+
+    const handleStudentsUpdated = () => {
+      setSubmissionSyncTick(prev => prev + 1);
+    };
+    window.addEventListener('eduplay_students_updated', handleStudentsUpdated);
+
     return () => {
-      unsubFirestore();
+      unsubAssign();
+      unsubExam();
       window.removeEventListener('eduplay_student_submissions_updated', handleSubmissionsUpdated);
+      window.removeEventListener('eduplay_exam_submissions_updated', handleSubmissionsUpdated);
       window.removeEventListener('storage', handleSubmissionsUpdated);
+      window.removeEventListener('eduplay_students_updated', handleStudentsUpdated);
     };
   }, []);
 
@@ -280,10 +313,15 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     const uniqueStudentKeys = new Set<string>();
 
     const targetAsId = String(as.id || '').trim().toLowerCase();
-    const liveSet = liveAssignmentSubmissionsMap.get(targetAsId);
-    if (liveSet) {
-      liveSet.forEach(k => uniqueStudentKeys.add(k));
-    }
+    const origAsId = String((as as any).originalAssignmentId || (as as any).homeworkId || '').trim().toLowerCase();
+    const rootAsId = targetAsId.replace(/-class-.*$/, '');
+
+    [targetAsId, origAsId, rootAsId].filter(Boolean).forEach(id => {
+      const liveSet = liveAssignmentSubmissionsMap.get(id);
+      if (liveSet) {
+        liveSet.forEach(k => uniqueStudentKeys.add(k));
+      }
+    });
 
     const subs = Array.isArray(as.submissions) ? as.submissions : [];
     subs.forEach((s: any) => {
@@ -316,7 +354,17 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
 
     // Get authentic class students roster or default fallback
     const targetClassName = detailAssignment.targetClass || 'Lớp 3A';
-    const classStudentsRoster = getStudentsFromLocalStorage(targetClassName) || [];
+    let classStudentsRoster = getStudentsFromLocalStorage(targetClassName) || [];
+    
+    if (classStudentsRoster.length === 0 && typeof window !== 'undefined') {
+      try {
+        const allLocal = getAllStudentsFromLocalStorage();
+        const found = allLocal[getStandardClassName(targetClassName)] || allLocal[normalizeClassKey(targetClassName)];
+        if (found && Array.isArray(found) && found.length > 0) {
+          classStudentsRoster = found;
+        }
+      } catch {}
+    }
     
     const subList: any[] = Array.isArray(detailAssignment.submissions) ? [...detailAssignment.submissions] : [];
     const subMap = new Map<string, any>();
@@ -1385,8 +1433,11 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
                 </tr>
               ) : (
                 paginatedAssignments.map((as) => {
-                  const classRoster = getStudentsFromLocalStorage(as.targetClass || '');
-                  const total = (classRoster && classRoster.length > 0) ? classRoster.length : (as.targetClass?.includes('3C') ? 38 : (as.totalStudents || 38));
+                  const targetCls = as.targetClass || '';
+                  const classRoster = getStudentsFromLocalStorage(targetCls);
+                  const actualRosterCount = (classRoster && Array.isArray(classRoster) && classRoster.length > 0) ? classRoster.length : 0;
+                  const fallbackCount = getClassStudentCount(targetCls) || as.totalStudents || 0;
+                  const total = actualRosterCount || fallbackCount || (targetCls ? 39 : 0);
                   const completed = getAssignmentSubmissionCount(as);
                   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
                   const isShared = isAssignmentShared(as);

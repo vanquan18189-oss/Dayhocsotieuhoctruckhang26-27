@@ -10,6 +10,24 @@ import {
 } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
 
+export const requiredFirebaseEnvVarNames = [
+  'VITE_FIREBASE_API_KEY',
+  'VITE_FIREBASE_AUTH_DOMAIN',
+  'VITE_FIREBASE_PROJECT_ID',
+  'VITE_FIREBASE_STORAGE_BUCKET',
+  'VITE_FIREBASE_MESSAGING_SENDER_ID',
+  'VITE_FIREBASE_APP_ID'
+];
+
+export function getMissingFirebaseEnvVars(): string[] {
+  const env = (import.meta as any).env || {};
+  return requiredFirebaseEnvVarNames.filter(varName => !env[varName] || String(env[varName]).trim() === '');
+}
+
+export function hasMissingFirebaseEnvVars(): boolean {
+  return getMissingFirebaseEnvVars().length > 0;
+}
+
 export const firebaseConfig = {
   apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || "AIzaSyD0t6_1DxzdkdKMRJQ6FUOoMUCkw8ePfJU",
   authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || "dayhocsotruckhangth26-27.firebaseapp.com",
