@@ -16,16 +16,31 @@ export function extractGradeDigit(str?: string | number): string {
   return match ? match[0] : '';
 }
 
-export function isGradeMatching(itemGrade?: string | number, filterGrade?: string): boolean {
+export function isGradeMatching(itemGrade?: string | number, filterGrade?: string, fallbackClass?: string): boolean {
   if (!filterGrade || filterGrade === 'Tất cả các khối' || filterGrade === 'Tất cả khối' || filterGrade === 'all') return true;
-  if (itemGrade === undefined || itemGrade === null) return false;
-  const itemStr = String(itemGrade).trim().toLowerCase();
-  const filterStr = String(filterGrade).trim().toLowerCase();
-  if (itemStr === filterStr) return true;
-  const itemDigit = extractGradeDigit(itemStr);
-  const filterDigit = extractGradeDigit(filterStr);
-  if (itemDigit && filterDigit) return itemDigit === filterDigit;
-  return itemStr.includes(filterStr) || filterStr.includes(itemStr);
+  
+  const filterDigit = extractGradeDigit(filterGrade);
+
+  if (itemGrade !== undefined && itemGrade !== null && String(itemGrade).trim() !== '') {
+    const itemStr = String(itemGrade).trim().toLowerCase();
+    const filterStr = String(filterGrade).trim().toLowerCase();
+    if (itemStr === filterStr) return true;
+    const itemDigit = extractGradeDigit(itemStr);
+    if (itemDigit && filterDigit && itemDigit === filterDigit) return true;
+    if (itemStr.includes(filterStr) || filterStr.includes(itemStr)) return true;
+  }
+
+  if (fallbackClass) {
+    const classDigit = extractGradeDigit(fallbackClass);
+    if (classDigit && filterDigit && classDigit === filterDigit) return true;
+  }
+
+  // If itemGrade and fallbackClass are both empty, do not suppress
+  if ((itemGrade === undefined || itemGrade === null || String(itemGrade).trim() === '') && !fallbackClass) {
+    return true;
+  }
+
+  return false;
 }
 
 export interface QuestionTypeDefinition {

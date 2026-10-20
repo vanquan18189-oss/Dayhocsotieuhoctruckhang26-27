@@ -295,11 +295,23 @@ export function PortalView({ onSelectPortal }: PortalViewProps) {
     }
   }, [currentClassStudents, sortDirection]);
 
+  // Student roster loading state for network latency handling (Request 4)
+  const [isRosterLoading, setIsRosterLoading] = useState<boolean>(true);
+  const [rosterRetryCount, setRosterRetryCount] = useState<number>(0);
+
+  const handleManualReloadRoster = () => {
+    setIsRosterLoading(true);
+    setRosterRetryCount((prev) => prev + 1);
+  };
+
   // Re-fetch and sync when selectedClass changes or window update event occurs
   useEffect(() => {
     let isMounted = true;
+    setIsRosterLoading(true);
 
-    const loadClassRoster = () => {
+    let retryTimer: NodeJS.Timeout | null = null;
+
+    const loadClassRoster = (attempt = 1) => {
       fetchClassStudentsFromFirestore(selectedClass)
         .then((cloudStudents) => {
           if (!isMounted) return;
@@ -310,23 +322,34 @@ export function PortalView({ onSelectPortal }: PortalViewProps) {
               [getStandardClassName(selectedClass)]: cloudStudents,
               [normalizeClassKey(selectedClass)]: cloudStudents
             }));
+            setIsRosterLoading(false);
           } else {
-            setCurrentClassStudents([]);
-            setAllClassRosters((prev) => ({
-              ...prev,
-              [getStandardClassName(selectedClass)]: [],
-              [normalizeClassKey(selectedClass)]: []
-            }));
+            // Auto-retry once after 1 second if network delay caused initial empty result
+            if (attempt === 1) {
+              retryTimer = setTimeout(() => {
+                if (!isMounted) return;
+                loadClassRoster(2);
+              }, 1000);
+            } else {
+              setCurrentClassStudents([]);
+              setAllClassRosters((prev) => ({
+                ...prev,
+                [getStandardClassName(selectedClass)]: [],
+                [normalizeClassKey(selectedClass)]: []
+              }));
+              setIsRosterLoading(false);
+            }
           }
         })
         .catch(() => {
           if (isMounted) {
             setCurrentClassStudents([]);
+            setIsRosterLoading(false);
           }
         });
     };
 
-    loadClassRoster();
+    loadClassRoster(1);
 
     // Real-time Firestore subscription for immediate live sync
     const unsubscribeSnapshot = subscribeToFirestoreClassStudents(selectedClass, (liveStudents) => {
@@ -338,28 +361,25 @@ export function PortalView({ onSelectPortal }: PortalViewProps) {
           [getStandardClassName(selectedClass)]: liveStudents,
           [normalizeClassKey(selectedClass)]: liveStudents
         }));
-      } else {
-        setCurrentClassStudents([]);
-        setAllClassRosters((prev) => ({
-          ...prev,
-          [getStandardClassName(selectedClass)]: [],
-          [normalizeClassKey(selectedClass)]: []
-        }));
+        setIsRosterLoading(false);
+      } else if (currentClassStudents.length === 0) {
+        setIsRosterLoading(false);
       }
     });
 
     // Listen to live update event from User Management Module
     const handleUpdate = () => {
-      loadClassRoster();
+      loadClassRoster(1);
     };
     window.addEventListener('eduplay_students_updated', handleUpdate);
 
     return () => {
       isMounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
       unsubscribeSnapshot();
       window.removeEventListener('eduplay_students_updated', handleUpdate);
     };
-  }, [selectedClass]);
+  }, [selectedClass, rosterRetryCount]);
 
   // Helper to persist teacher info
   const saveTeacherSession = (email: string, name?: string) => {
@@ -396,6 +416,7 @@ export function PortalView({ onSelectPortal }: PortalViewProps) {
 
   // Step 2 Click Class Handler: Switch directly to student_roster view inside Portal
   const handleSelectClass = (cls: string) => {
+    setIsRosterLoading(true);
     setSelectedClass(cls);
     setSelectedStudent(null);
     setPinInput('');
@@ -857,9 +878,19 @@ export function PortalView({ onSelectPortal }: PortalViewProps) {
               </div>
             </div>
 
-            {/* Avatar Grid Container with smooth scroll */}
-            {displayedStudents.length === 0 ? (
-              <div className="py-14 text-center text-slate-500 bg-slate-50/80 rounded-3xl border-2 border-dashed border-slate-200 p-6 my-2">
+            {/* Avatar Grid Container with smooth scroll and loading indicator */}
+            {isRosterLoading ? (
+              <div className="py-14 text-center text-slate-500 bg-white/90 rounded-3xl border border-amber-200 p-8 my-2 shadow-2xs flex flex-col items-center justify-center animate-pulse">
+                <div className="w-12 h-12 rounded-full border-4 border-amber-400 border-t-transparent animate-spin mb-4" />
+                <p className="text-sm font-extrabold text-amber-900">
+                  Đang tải danh sách học sinh Lớp {selectedClass}...
+                </p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Hệ thống đang kết nối cơ sở dữ liệu, bé đợi một chút nhé!
+                </p>
+              </div>
+            ) : displayedStudents.length === 0 ? (
+              <div className="py-12 text-center text-slate-500 bg-slate-50/80 rounded-3xl border-2 border-dashed border-slate-200 p-6 my-2">
                 <div className="w-12 h-12 rounded-2xl bg-amber-50 border border-amber-200 text-amber-500 flex items-center justify-center mx-auto mb-3">
                   <AlertCircle className="w-6 h-6" />
                 </div>
@@ -869,6 +900,21 @@ export function PortalView({ onSelectPortal }: PortalViewProps) {
                 <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
                   Lớp {selectedClass} hiện chưa có danh sách học sinh trên hệ thống.
                 </p>
+                <div className="mt-4 flex items-center justify-center gap-3">
+                  <button
+                    onClick={handleManualReloadRoster}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 flex items-center gap-2 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    <span>Tải lại danh sách</span>
+                  </button>
+                  <button
+                    onClick={() => setPortalMode('student_grades')}
+                    className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                  >
+                    <span>Chọn lớp khác</span>
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="max-h-[380px] sm:max-h-[420px] overflow-y-auto pr-1 grid grid-cols-2 sm:grid-cols-4 gap-3.5 custom-scrollbar">

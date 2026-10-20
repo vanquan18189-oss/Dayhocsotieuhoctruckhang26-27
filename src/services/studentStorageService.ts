@@ -840,7 +840,10 @@ export async function fetchClassStudentsFromFirestore(className: string): Promis
   try {
     if (!db) return [];
 
+    const stdName = getStandardClassName(className);
     const classKey = normalizeClassKey(className);
+
+    // 1. Try class_rosters doc by classKey, lowercase key, or stdName
     let rosterRef = doc(db, 'class_rosters', classKey);
     let docSnap = await getDoc(rosterRef);
 
@@ -849,13 +852,56 @@ export async function fetchClassStudentsFromFirestore(className: string): Promis
       docSnap = await getDoc(rosterRef);
     }
 
+    if (!docSnap.exists()) {
+      rosterRef = doc(db, 'class_rosters', stdName);
+      docSnap = await getDoc(rosterRef);
+    }
+
     if (docSnap.exists()) {
       const data = docSnap.data();
-      if (Array.isArray(data?.students) && data.students.length > 0) {
-        const cleaned = deduplicateAndNormalizeStudents(data.students as StudentRecord[], className);
+      const studentList = Array.isArray(data?.students)
+        ? data.students
+        : (Array.isArray(data?.studentList) ? data.studentList : (Array.isArray(data?.roster) ? data.roster : []));
+      if (Array.isArray(studentList) && studentList.length > 0) {
+        const cleaned = deduplicateAndNormalizeStudents(studentList as StudentRecord[], className);
         saveStudentsToLocalStorage(className, cleaned);
         return cleaned;
       }
+    }
+
+    // 2. Fallback: Query 'students' collection directly by className or classId
+    try {
+      const rawClass = className.trim();
+      const cleanNum = rawClass.replace(/[^0-9a-zA-Z]/g, '');
+
+      const qStudents = query(collection(db, 'students'));
+      const stdSnap = await getDocs(qStudents);
+      if (!stdSnap.empty) {
+        const foundStudents: StudentRecord[] = [];
+        stdSnap.forEach((d) => {
+          const sData = d.data() as StudentRecord;
+          const sClass = (sData.className || (sData as any).class || (sData as any).classId || (sData as any).lop || '').toString().trim();
+          if (sClass) {
+            const sStd = getStandardClassName(sClass);
+            const sCleanNum = sClass.replace(/[^0-9a-zA-Z]/g, '');
+            if (
+              sClass.toLowerCase() === rawClass.toLowerCase() ||
+              sStd.toLowerCase() === stdName.toLowerCase() ||
+              sCleanNum.toLowerCase() === cleanNum.toLowerCase()
+            ) {
+              foundStudents.push({ ...sData, id: d.id });
+            }
+          }
+        });
+
+        if (foundStudents.length > 0) {
+          const cleaned = deduplicateAndNormalizeStudents(foundStudents, className);
+          saveStudentsToLocalStorage(className, cleaned);
+          return cleaned;
+        }
+      }
+    } catch (e) {
+      console.warn('Lỗi query fallback collection students:', e);
     }
   } catch (err) {
     console.warn('Không thể đọc dữ liệu học sinh từ Firestore:', err);
@@ -1058,12 +1104,24 @@ export function subscribeToFirestoreClassStudents(
         } catch {}
       }
 
-      // If document doesn't exist or has 0 students in Firestore:
+      // If class_rosters document doesn't exist or is empty, try fallback check
+      try {
+        const fallbackStudents = await fetchClassStudentsFromFirestore(className);
+        if (fallbackStudents && fallbackStudents.length > 0) {
+          onUpdate(fallbackStudents);
+          return;
+        }
+      } catch {}
+
       onUpdate([]);
     },
     (error) => {
       console.warn(`Firestore onSnapshot warning for class ${className}:`, error);
-      onUpdate([]);
+      fetchClassStudentsFromFirestore(className).then((students) => {
+        onUpdate(students || []);
+      }).catch(() => {
+        onUpdate([]);
+      });
     }
   );
 

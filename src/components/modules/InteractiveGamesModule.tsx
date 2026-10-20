@@ -1427,7 +1427,7 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
                 {(() => {
                   const customRooms = normalizedGames.filter(g => g.id !== 'game-1' && g.id !== 'game-2' && g.id !== 'game-3' && g.id !== 'game-4');
                   const filteredRooms = customRooms.filter(room => {
-                    if (!isGradeMatching(room.grade, filterGrade)) return false;
+                    if (!isGradeMatching(room.grade, filterGrade, room.classInfo)) return false;
                     if (!isClassMatching(room.classInfo, filterClass)) return false;
                     if (!isSubjectMatching(room.subject, filterSubject)) return false;
                     return true;
@@ -1602,7 +1602,7 @@ export const InteractiveGamesModule: React.FC<InteractiveGamesModuleProps> = ({
               {(() => {
                 const customRooms = normalizedGames.filter(g => g.id !== 'game-1' && g.id !== 'game-2' && g.id !== 'game-3' && g.id !== 'game-4');
                 const filteredRooms = customRooms.filter(room => {
-                  if (!isGradeMatching(room.grade, filterGrade)) return false;
+                  if (!isGradeMatching(room.grade, filterGrade, room.classInfo)) return false;
                   if (!isClassMatching(room.classInfo, filterClass)) return false;
                   if (!isSubjectMatching(room.subject, filterSubject)) return false;
                   return true;
