@@ -29,7 +29,8 @@ import {
   getAdminSelectedModel,
   setAdminSelectedModel,
   getActiveModelInfo,
-  sanitizeErrorMessage
+  sanitizeErrorMessage,
+  getAvailableGeminiModels
 } from '../services/geminiService';
 import { db, auth } from '../services/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -138,6 +139,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [globalApiKeyInput, setGlobalApiKeyInput] = useState('');
   const [adminModelInput, setAdminModelInput] = useState<string>(() => getAdminSelectedModel());
+  const [availableModelList, setAvailableModelList] = useState<string[]>(['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest']);
   const [latencyResult, setLatencyResult] = useState<LatencyTestResult | null>(null);
   const [isTestingLatency, setIsTestingLatency] = useState(false);
   const [isSavingFirestore, setIsSavingFirestore] = useState(false);
@@ -245,6 +247,13 @@ export const Header: React.FC<HeaderProps> = ({
         setGlobalApiKeyInput(cachedGlobal);
       }
 
+      const activeKey = (apiKey !== undefined ? apiKey : getStoredApiKey()) || cachedGlobal;
+      if (activeKey) {
+        getAvailableGeminiModels(activeKey).then(list => {
+          if (list && list.length > 0) setAvailableModelList(list);
+        }).catch(() => {});
+      }
+
       const fetchGlobalKey = async () => {
         if (!db) return;
         try {
@@ -259,6 +268,9 @@ export const Header: React.FC<HeaderProps> = ({
             if (fetchedKey) {
               setGlobalApiKeyInput(fetchedKey);
               setStoredGlobalApiKey(fetchedKey);
+              getAvailableGeminiModels(fetchedKey).then(list => {
+                if (list && list.length > 0) setAvailableModelList(list);
+              }).catch(() => {});
             }
           }
         } catch (e: any) {
@@ -276,10 +288,17 @@ export const Header: React.FC<HeaderProps> = ({
     setLatencyResult(null);
     setTestingProgress('Đang chuẩn bị kiểm tra...');
 
+    const activeKeyToTest = apiKeyInput || globalApiKeyInput;
     const result = await testGeminiLatency(
-      apiKeyInput || globalApiKeyInput,
+      activeKeyToTest,
       (progressText) => setTestingProgress(progressText)
     );
+
+    if (activeKeyToTest) {
+      getAvailableGeminiModels(activeKeyToTest).then(list => {
+        if (list && list.length > 0) setAvailableModelList(list);
+      }).catch(() => {});
+    }
 
     setLatencyResult(result);
     setIsTestingLatency(false);
@@ -583,10 +602,12 @@ export const Header: React.FC<HeaderProps> = ({
                   disabled={activeRole !== 'admin'}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-gray-50 text-gray-900 font-mono disabled:opacity-75 disabled:cursor-not-allowed"
                 >
-                  <option value="">Tự động ưu tiên (Mặc định: gemini-1.5-flash / Đã nhớ)</option>
-                  <option value="gemini-1.5-flash">gemini-1.5-flash (Mô hình chuẩn - Ổn định & Nhanh)</option>
-                  <option value="gemini-1.5-flash-latest">gemini-1.5-flash-latest (Bản cập nhật mới)</option>
-                  <option value="gemini-flash-latest">gemini-flash-latest (Alias tự động)</option>
+                  <option value="">Tự động ưu tiên (Mặc định: gemini-3.5-flash / Đã nhớ)</option>
+                  {availableModelList.map((m) => (
+                    <option key={m} value={m}>
+                      {m} {m === 'gemini-3.5-flash' ? '(Mặc định - Chuẩn thế hệ mới)' : m === 'gemini-3.1-flash-lite' ? '(Dự phòng - Nhanh & Nhẹ)' : m === 'gemini-flash-latest' ? '(Alias tự động)' : ''}
+                    </option>
+                  ))}
                 </select>
                 <p className="text-[11px] text-gray-400 mt-1">
                   Chỉ danh sách các mô hình sinh văn bản mới nhất. Lựa chọn này áp dụng cho toàn bộ tính năng AI.

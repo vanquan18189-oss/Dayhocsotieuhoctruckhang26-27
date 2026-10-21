@@ -65,7 +65,7 @@ async function startServer() {
     const startTime = Date.now();
     try {
       const ai = await getGeminiClient(customKey);
-      const candidateModels = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-flash-latest'];
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
       let lastError: any = null;
       for (const modelName of candidateModels) {
         try {
@@ -89,13 +89,15 @@ async function startServer() {
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       let errMsg = error?.message || 'Lỗi kết nối Gemini API';
-      if (errMsg.includes('429') || errMsg.includes('Quota') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+      if (errMsg.includes('404') || errMsg.includes('NOT_FOUND') || errMsg.includes('not found')) {
+        errMsg = 'Mô hình đã ngừng. Vui lòng chuyển sang mô hình Gemini mới hơn như gemini-3.5-flash.';
+      } else if (errMsg.includes('429') || errMsg.includes('Quota') || errMsg.includes('RESOURCE_EXHAUSTED')) {
         errMsg = 'Hạn mức API Gemini đã hết (Quota Exceeded). Vui lòng nạp thêm hạn mức hoặc dùng API Key cá nhân khác.';
       }
       res.status(500).json({
         latencyMs: durationMs,
         status: 'error',
-        modelName: 'gemini-1.5-flash',
+        modelName: 'gemini-3.5-flash',
         message: errMsg,
       });
     }
@@ -148,7 +150,7 @@ async function startServer() {
         }
       }
 
-      const candidateModels = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-flash-latest'];
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
       let response: any = null;
       let lastError: any = null;
 
@@ -178,7 +180,9 @@ async function startServer() {
       let rawMsg = error.message || '';
       let errMsg = 'Hệ thống AI đang quá tải tạm thời. Thầy/Cô vui lòng bấm "Thử lại ngay" hoặc thử lại sau ít phút nhé!';
       
-      if (rawMsg.includes('429') || rawMsg.includes('Quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
+      if (rawMsg.includes('404') || rawMsg.includes('NOT_FOUND') || rawMsg.includes('not found')) {
+        errMsg = 'Mô hình đã ngừng. Vui lòng chuyển sang mô hình Gemini mới hơn như gemini-3.5-flash.';
+      } else if (rawMsg.includes('429') || rawMsg.includes('Quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
         errMsg = 'Hạn mức API Gemini đã hết (Quota Exceeded). Vui lòng kiểm tra lại API Key trong cài đặt.';
       } else if (rawMsg.includes('503') || rawMsg.includes('UNAVAILABLE') || rawMsg.includes('high demand') || rawMsg.includes('overloaded')) {
         errMsg = 'Hệ thống AI đang quá tải tạm thời. Thầy/Cô vui lòng bấm "Thử lại ngay" hoặc thử lại sau ít phút nhé!';
@@ -187,7 +191,9 @@ async function startServer() {
       } else if (rawMsg) {
         try {
           const parsed = JSON.parse(rawMsg);
-          if (parsed?.error?.code === 503 || parsed?.error?.status === 'UNAVAILABLE') {
+          if (parsed?.error?.code === 404 || parsed?.error?.status === 'NOT_FOUND') {
+            errMsg = 'Mô hình đã ngừng. Vui lòng chuyển sang mô hình Gemini mới hơn như gemini-3.5-flash.';
+          } else if (parsed?.error?.code === 503 || parsed?.error?.status === 'UNAVAILABLE') {
             errMsg = 'Hệ thống AI đang quá tải tạm thời. Thầy/Cô vui lòng bấm "Thử lại ngay" hoặc thử lại sau ít phút nhé!';
           } else if (parsed?.error?.message) {
             errMsg = parsed.error.message;

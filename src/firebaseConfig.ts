@@ -19,9 +19,34 @@ export const requiredFirebaseEnvVarNames = [
   'VITE_FIREBASE_APP_ID'
 ];
 
+/**
+ * Cấu hình mặc định dự phòng trực tiếp bằng mã nguồn cho dự án 'dayhocsotruckhangth26-27'
+ * Đảm bảo ứng dụng luôn kết nối thành công với Firestore ngay cả khi chưa nạp biến môi trường Preview.
+ */
+export const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyD0t6_1DxzdkdKMRJQ6FUOoMUCkw8ePfJU",
+  authDomain: "dayhocsotruckhangth26-27.firebaseapp.com",
+  projectId: "dayhocsotruckhangth26-27",
+  storageBucket: "dayhocsotruckhangth26-27.firebasestorage.app",
+  messagingSenderId: "254110290660",
+  appId: "1:254110290660:web:aa0dd28a71bec309cbd2f1",
+  measurementId: "G-8NZL4K2NSD"
+};
+
 export function getMissingFirebaseEnvVars(): string[] {
   const env = (import.meta as any).env || {};
-  return requiredFirebaseEnvVarNames.filter(varName => !env[varName] || String(env[varName]).trim() === '');
+  return requiredFirebaseEnvVarNames.filter(varName => {
+    const hasEnv = Boolean(env[varName] && String(env[varName]).trim() !== '');
+    const key = varName.replace('VITE_FIREBASE_', '').toLowerCase();
+    const configKey = key === 'api_key' ? 'apiKey' :
+                      key === 'auth_domain' ? 'authDomain' :
+                      key === 'project_id' ? 'projectId' :
+                      key === 'storage_bucket' ? 'storageBucket' :
+                      key === 'messaging_sender_id' ? 'messagingSenderId' :
+                      key === 'app_id' ? 'appId' : key;
+    const hasFallback = Boolean((DEFAULT_FIREBASE_CONFIG as any)[configKey]);
+    return !hasEnv && !hasFallback;
+  });
 }
 
 export function hasMissingFirebaseEnvVars(): boolean {
@@ -29,14 +54,30 @@ export function hasMissingFirebaseEnvVars(): boolean {
 }
 
 export const firebaseConfig = {
-  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || "AIzaSyD0t6_1DxzdkdKMRJQ6FUOoMUCkw8ePfJU",
-  authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || "dayhocsotruckhangth26-27.firebaseapp.com",
-  projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || "dayhocsotruckhangth26-27",
-  storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || "dayhocsotruckhangth26-27.firebasestorage.app",
-  messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || "254110290660",
-  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || "1:254110290660:web:aa0dd28a71bec309cbd2f1",
-  measurementId: (import.meta as any).env?.VITE_FIREBASE_MEASUREMENT_ID || "G-8NZL4K2NSD"
+  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || DEFAULT_FIREBASE_CONFIG.apiKey,
+  authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || DEFAULT_FIREBASE_CONFIG.authDomain,
+  projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_CONFIG.projectId,
+  storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || DEFAULT_FIREBASE_CONFIG.storageBucket,
+  messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || DEFAULT_FIREBASE_CONFIG.messagingSenderId,
+  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || DEFAULT_FIREBASE_CONFIG.appId,
+  measurementId: (import.meta as any).env?.VITE_FIREBASE_MEASUREMENT_ID || DEFAULT_FIREBASE_CONFIG.measurementId
 };
+
+/**
+ * Khởi tạo lại kết nối mạng Firestore để tải dữ liệu ngay lập tức
+ */
+export async function reconnectFirebase(): Promise<boolean> {
+  try {
+    await resetFirestoreQuotaAndEnableNetwork();
+    if (db) {
+      await enableNetwork(db).catch(() => {});
+    }
+    return true;
+  } catch (e) {
+    console.warn('reconnectFirebase error:', e);
+    return false;
+  }
+}
 
 const app = initializeApp(firebaseConfig);
 

@@ -9,7 +9,11 @@ import {
   Maximize2,
   ShieldAlert,
   Database,
-  Layers
+  Layers,
+  FileText,
+  CheckCircle2,
+  AlertTriangle,
+  Users
 } from 'lucide-react';
 import {
   getFirestoreWriteStats,
@@ -17,9 +21,27 @@ import {
   FirestoreWriteStatsSummary,
   BlockedMetricItem
 } from '../services/firestoreWriteTracker';
-import { db } from '../services/firebase';
+import { db, firebaseConfig, reconnectFirebase } from '../firebaseConfig';
 import { collection, getDocs, getDocsFromServer } from 'firebase/firestore';
 import { getLocalCachedQuestions } from '../services/questionStorageService';
+
+interface ExamSubmissionDiag {
+  id: string;
+  title: string;
+  targetClass: string;
+  realSubmissionsCount: number; // actual documents in exams/{id}/submissions
+  tableDisplayCount: number; // submissionsCount stored on the exam doc
+  isMatch: boolean;
+}
+
+interface ClassRosterEnrollmentDiag {
+  classId: string;
+  className: string;
+  rosterCount: number;
+  enrollmentCount: number;
+  diff: number;
+  isMatch: boolean;
+}
 
 export const FirestoreDebugOverlay: React.FC = () => {
   const [isDebugMode, setIsDebugMode] = useState<boolean>(false);
@@ -35,11 +57,17 @@ export const FirestoreDebugOverlay: React.FC = () => {
     mockCount: number;
   }>({ firestoreCount: 0, uiCount: 0, serverCount: 0, cacheCount: 0, mockCount: 0 });
 
+  const [examDiags, setExamDiags] = useState<ExamSubmissionDiag[]>([]);
+  const [classDiags, setClassDiags] = useState<ClassRosterEnrollmentDiag[]>([]);
+  const [isLoadingDiags, setIsLoadingDiags] = useState<boolean>(false);
+
   useEffect(() => {
     if (!isDebugMode) return;
 
-    const checkQuestionDiag = async () => {
+    const checkAllDiagnostics = async () => {
+      setIsLoadingDiags(true);
       try {
+        // 1. Question Diag
         const cached = getLocalCachedQuestions();
         const uiCount = cached ? cached.length : 0;
         let firestoreCount = 0;
@@ -65,13 +93,87 @@ export const FirestoreDebugOverlay: React.FC = () => {
           cacheCount: isServer ? Math.max(0, uiCount - firestoreCount) : uiCount,
           mockCount
         });
+
+        // 2. Exam Submissions Comparison (?debug=1 requirement)
+        if (db) {
+          try {
+            const examsSnap = await getDocs(collection(db, 'exams'));
+            const examResults: ExamSubmissionDiag[] = [];
+            for (const ed of examsSnap.docs) {
+              const edData = ed.data();
+              let realSubCount = 0;
+              try {
+                const subsSnap = await getDocs(collection(db, 'exams', ed.id, 'submissions'));
+                realSubCount = subsSnap.size;
+              } catch {}
+              const tableCount = typeof edData.submissionsCount === 'number'
+                ? edData.submissionsCount
+                : (Array.isArray(edData.submissions) ? edData.submissions.length : 0);
+
+              examResults.push({
+                id: ed.id,
+                title: edData.title || '(Chưa đặt tên)',
+                targetClass: edData.targetClass || 'Chưa giao',
+                realSubmissionsCount: realSubCount,
+                tableDisplayCount: tableCount,
+                isMatch: realSubCount === tableCount
+              });
+            }
+            setExamDiags(examResults);
+          } catch (e) {
+            console.warn('Exam diagnostic error in debug overlay:', e);
+          }
+
+          // 3. Class Rosters vs Student Enrollments comparison
+          try {
+            const rosterSnap = await getDocs(collection(db, 'class_rosters'));
+            const rosterMap: Record<string, { className: string; count: number }> = {};
+            rosterSnap.forEach((rd) => {
+              const rData = rd.data();
+              const cName = rData.className || rd.id;
+              const count = Array.isArray(rData.students) ? rData.students.length : (typeof rData.totalStudents === 'number' ? rData.totalStudents : 0);
+              const key = cName.trim().toUpperCase().replace(/^LỚP\s*/i, '');
+              rosterMap[key] = { className: cName, count };
+            });
+
+            const enrollSnap = await getDocs(collection(db, 'student_enrollments'));
+            const enrollMap: Record<string, number> = {};
+            enrollSnap.forEach((end) => {
+              const eData = end.data();
+              const rawClass = eData.classId || eData.className || '';
+              const key = rawClass.trim().toUpperCase().replace(/^LỚP\s*/i, '');
+              if (key) {
+                enrollMap[key] = (enrollMap[key] || 0) + 1;
+              }
+            });
+
+            const allClasses = Array.from(new Set([...Object.keys(rosterMap), ...Object.keys(enrollMap)])).sort();
+            const classResults: ClassRosterEnrollmentDiag[] = allClasses.map((cls) => {
+              const rCount = rosterMap[cls]?.count || 0;
+              const eCount = enrollMap[cls] || 0;
+              return {
+                classId: cls,
+                className: rosterMap[cls]?.className || `Lớp ${cls}`,
+                rosterCount: rCount,
+                enrollmentCount: eCount,
+                diff: eCount - rCount,
+                isMatch: rCount === eCount
+              };
+            });
+            setClassDiags(classResults);
+          } catch (e) {
+            console.warn('Class roster diagnostic error in debug overlay:', e);
+          }
+        }
       } catch (err) {
-        console.warn('Question diagnostic error:', err);
+        console.warn('Debug diagnostic error:', err);
+      } finally {
+        setIsLoadingDiags(false);
       }
     };
 
-    checkQuestionDiag();
-    const interval = setInterval(checkQuestionDiag, 4000);
+    checkAllDiagnostics();
+    const interval = setInterval(checkAllDiagnostics, 6000);
     return () => clearInterval(interval);
   }, [isDebugMode]);
 
@@ -222,6 +324,158 @@ export const FirestoreDebugOverlay: React.FC = () => {
                     {stats.blockedWritesCount}
                   </div>
                 </div>
+              </div>
+
+              {/* Active Project ID & Security Info */}
+              <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/80 flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span className="text-slate-300 font-semibold text-xs">Firebase Project ID:</span>
+                  <span className="font-mono text-emerald-300 font-bold bg-slate-900/90 px-2.5 py-0.5 rounded border border-slate-700 text-xs">
+                    {firebaseConfig.projectId || 'dayhocsotruckhangth26-27'}
+                  </span>
+                  <span className="text-[10px] bg-emerald-950/80 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800/60 font-semibold">
+                    Cấu hình dự phòng: Sẵn sàng
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      await reconnectFirebase();
+                      window.location.reload();
+                    }}
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-[10px] transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                    title="Khởi tạo lại kết nối Firestore và tải lại dữ liệu"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Kết nối lại
+                  </button>
+                  <span className="text-[10px] text-slate-400 italic">
+                    (Khóa apiKey được bảo vệ an toàn - không in ra debug)
+                  </span>
+                </div>
+              </div>
+
+              {/* Exam Submissions Real Count vs Table Display Count Diag */}
+              <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-bold text-amber-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Đối soát Đề thi: Submissions thật trong Firestore vs Bảng giáo viên</span>
+                  </h5>
+                  <span className="text-[10px] text-slate-400">
+                    {isLoadingDiags ? 'Đang kiểm tra...' : `${examDiags.length} đề thi`}
+                  </span>
+                </div>
+
+                {examDiags.length === 0 ? (
+                  <div className="text-slate-500 italic text-[11px] py-2 bg-slate-900/40 rounded-lg text-center">
+                    {isLoadingDiags ? 'Đang truy vấn dữ liệu đề...' : 'Không có đề kiểm tra nào trên Firestore.'}
+                  </div>
+                ) : (
+                  <div className="bg-slate-900/60 rounded-xl overflow-hidden border border-slate-700/60 max-h-48 overflow-y-auto">
+                    <table className="w-full text-left border-collapse text-[11px]">
+                      <thead>
+                        <tr className="bg-slate-800/90 text-slate-400 text-[10px] uppercase border-b border-slate-700/60 sticky top-0 z-10">
+                          <th className="py-1.5 px-2.5 font-semibold">Tên đề thi & Lớp</th>
+                          <th className="py-1.5 px-2 font-semibold text-center">Tài liệu thật (Firestore)</th>
+                          <th className="py-1.5 px-2 font-semibold text-center">Hiển thị (Bảng)</th>
+                          <th className="py-1.5 px-2 font-semibold text-center">Trạng thái</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800 font-mono">
+                        {examDiags.map((ex) => (
+                          <tr key={ex.id} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="py-1.5 px-2.5 font-sans">
+                              <div className="font-bold text-slate-200 line-clamp-1">{ex.title}</div>
+                              <div className="text-[10px] text-slate-400">{ex.targetClass} • <span className="font-mono text-[9px] text-slate-500">{ex.id}</span></div>
+                            </td>
+                            <td className="py-1.5 px-2 text-center font-bold text-emerald-400">
+                              {ex.realSubmissionsCount}
+                            </td>
+                            <td className="py-1.5 px-2 text-center font-bold text-blue-400">
+                              {ex.tableDisplayCount}
+                            </td>
+                            <td className="py-1.5 px-2 text-center">
+                              {ex.isMatch ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded">
+                                  <CheckCircle2 className="w-3 h-3" /> Khớp
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-950/60 border border-rose-800/60 px-1.5 py-0.5 rounded">
+                                  <AlertTriangle className="w-3 h-3" /> Lệch ({ex.realSubmissionsCount - ex.tableDisplayCount > 0 ? `+${ex.realSubmissionsCount - ex.tableDisplayCount}` : ex.realSubmissionsCount - ex.tableDisplayCount})
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Student Rosters vs Enrollments Diag */}
+              <div className="bg-slate-800/80 p-3 rounded-xl border border-slate-700/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <h5 className="font-bold text-indigo-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Đối soát Học sinh: class_rosters vs student_enrollments</span>
+                  </h5>
+                  <span className="text-[10px] text-slate-400">
+                    {classDiags.filter(c => !c.isMatch).length === 0
+                      ? 'Tất cả lớp khớp'
+                      : `Lệch ${classDiags.filter(c => !c.isMatch).length} lớp`}
+                  </span>
+                </div>
+
+                {classDiags.length === 0 ? (
+                  <div className="text-slate-500 italic text-[11px] py-2 bg-slate-900/40 rounded-lg text-center">
+                    {isLoadingDiags ? 'Đang đối soát danh sách lớp...' : 'Chưa có dữ liệu lớp trên Firestore.'}
+                  </div>
+                ) : (
+                  <div className="bg-slate-900/60 rounded-xl overflow-hidden border border-slate-700/60 max-h-48 overflow-y-auto">
+                    <table className="w-full text-left border-collapse text-[11px]">
+                      <thead>
+                        <tr className="bg-slate-800/90 text-slate-400 text-[10px] uppercase border-b border-slate-700/60 sticky top-0 z-10">
+                          <th className="py-1.5 px-2.5 font-semibold">Lớp</th>
+                          <th className="py-1.5 px-2 font-semibold text-center">class_rosters</th>
+                          <th className="py-1.5 px-2 font-semibold text-center">student_enrollments</th>
+                          <th className="py-1.5 px-2 font-semibold text-center">Chênh lệch</th>
+                          <th className="py-1.5 px-2 font-semibold text-center">Trạng thái</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800 font-mono">
+                        {classDiags.map((c) => (
+                          <tr key={c.classId} className={`hover:bg-slate-800/40 transition-colors ${!c.isMatch ? 'bg-amber-950/20' : ''}`}>
+                            <td className="py-1.5 px-2.5 font-sans font-bold text-slate-200">
+                              {c.className}
+                            </td>
+                            <td className="py-1.5 px-2 text-center font-bold text-emerald-400">
+                              {c.rosterCount}
+                            </td>
+                            <td className="py-1.5 px-2 text-center font-bold text-purple-400">
+                              {c.enrollmentCount}
+                            </td>
+                            <td className={`py-1.5 px-2 text-center font-bold ${c.diff === 0 ? 'text-slate-400' : c.diff > 0 ? 'text-amber-400' : 'text-rose-400'}`}>
+                              {c.diff > 0 ? `+${c.diff}` : c.diff}
+                            </td>
+                            <td className="py-1.5 px-2 text-center">
+                              {c.isMatch ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-1.5 py-0.5 rounded">
+                                  <CheckCircle2 className="w-3 h-3" /> Khớp
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400 bg-amber-950/60 border border-amber-800/60 px-1.5 py-0.5 rounded">
+                                  <AlertTriangle className="w-3 h-3" /> Lệch {Math.abs(c.diff)} HS
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {/* Question Bank Diagnostics Card */}

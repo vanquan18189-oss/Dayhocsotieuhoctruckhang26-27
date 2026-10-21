@@ -51,6 +51,7 @@ import {
   getMissingFirebaseEnvVars,
   hasMissingFirebaseEnvVars,
   resetFirestoreQuotaAndEnableNetwork,
+  reconnectFirebase,
   isFirestoreQuotaExceeded
 } from '../../firebaseConfig';
 import { getFirestoreDebugStatus } from '../../services/firestoreWriteVerificationService';
@@ -676,13 +677,8 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
       return;
     }
 
-    if (isFirestoreQuotaExceeded()) {
-      setServerErrorCause('Đã vượt quá hạn mức truy vấn máy chủ (resource-exhausted / quota exceeded). Hướng xử lý: Chờ tự động reset hạn mức hoặc kiểm tra gói dịch vụ.');
-      setIsServerConnecting(false);
-      return;
-    }
-
     try {
+      await reconnectFirebase();
       await resetFirestoreQuotaAndEnableNetwork();
       const fetchedExams = await getExamsFromFirestore();
       if (Array.isArray(fetchedExams) && fetchedExams.length > 0) {
@@ -690,21 +686,15 @@ export const StudentExamModule: React.FC<StudentExamModuleProps> = ({
         setLiveExams(clean);
         setIsServerConnecting(false);
         setServerErrorCause(null);
-      } else {
-        setIsServerConnecting(false);
+        return;
       }
     } catch (err: any) {
-      const msg = String(err?.message || err);
-      if (msg.includes('resource-exhausted') || msg.includes('quota')) {
-        setServerErrorCause('Hết hạn mức truy vấn máy chủ (resource-exhausted / quota exceeded).');
-      } else if (msg.includes('offline') || msg.includes('network')) {
-        setServerErrorCause('Mạng kết nối Firestore bị ngắt hoặc thiết bị ngoại tuyến.');
-      } else if (msg.includes('timeout') || msg.includes('TIMEOUT')) {
-        setServerErrorCause('Kết nối tới máy chủ bị quá thời gian chờ (timeout).');
-      } else {
-        setServerErrorCause(`Chưa kết nối được máy chủ: ${msg}`);
-      }
-      setIsServerConnecting(false);
+      console.warn('Retry fetch server error, attempting reload to re-establish connection...', err);
+    }
+
+    // Khi người dùng bấm nút "Thử lại", nếu chưa cập nhật được ngay, tự động tải lại trang để khởi tạo lại toàn bộ kết nối và nạp danh sách đề thi
+    if (typeof window !== 'undefined') {
+      window.location.reload();
     }
   };
 

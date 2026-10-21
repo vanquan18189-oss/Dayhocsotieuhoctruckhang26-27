@@ -13,13 +13,12 @@ const STORAGE_KEYS = [
   'gemini_api_key'
 ];
 
-export const DEFAULT_MODEL = 'gemini-1.5-flash';
-export const FALLBACK_MODEL = 'gemini-1.5-flash';
+export const DEFAULT_MODEL = 'gemini-3.5-flash';
+export const FALLBACK_MODEL = 'gemini-3.1-flash-lite';
 export const GEMINI_MODEL = DEFAULT_MODEL;
 export const FALLBACK_GEMINI_MODELS = [
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-latest',
-  'gemini-2.5-flash',
+  'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
   'gemini-flash-latest'
 ];
 
@@ -56,6 +55,7 @@ export function sanitizeErrorMessage(msg: string): string {
 /**
  * Filter function to keep ONLY text-generation models and exclude non-text models
  * (image, tts, audio, native-audio, live, embedding, imagen, veo, robotics, computer-use, realtime, bidirectional)
+ * and exclude deprecated/retired models (gemini-1.0, gemini-1.5, gemini-2.0, gemini-2.5, bison)
  */
 export function isTextOnlyGeminiModel(modelName: string): boolean {
   if (!modelName || typeof modelName !== 'string') return false;
@@ -70,8 +70,15 @@ export function isTextOnlyGeminiModel(modelName: string): boolean {
     if (name.includes(kw)) return false;
   }
 
-  // Exclude legacy bison/gemini-1.0 models
-  if (name.startsWith('gemini-1.0') || name.startsWith('text-bison') || name.startsWith('chat-bison')) {
+  // Exclude legacy & retired models
+  if (
+    name.startsWith('gemini-1.0') ||
+    name.startsWith('gemini-1.5') ||
+    name.startsWith('gemini-2.0') ||
+    name.startsWith('gemini-2.5') ||
+    name.startsWith('text-bison') ||
+    name.startsWith('chat-bison')
+  ) {
     return false;
   }
 
@@ -197,7 +204,7 @@ export function setStoredApiKey(key: string): void {
  * filtering for generateContent method and prioritizing flash models.
  */
 export async function getAvailableGeminiModels(apiKey: string): Promise<string[]> {
-  const defaultFallback = ['gemini-1.5-flash', 'gemini-1.5-flash-latest', 'gemini-2.5-flash', 'gemini-flash-latest'];
+  const defaultFallback = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
   try {
     const ai = createGeminiClient(apiKey);
     const response: any = await ai.models.list();
@@ -233,15 +240,17 @@ export async function getAvailableGeminiModels(apiKey: string): Promise<string[]
 
     if (candidateList.length > 0) {
       candidateList.sort((a, b) => {
+        if (a === 'gemini-3.5-flash') return -1;
+        if (b === 'gemini-3.5-flash') return 1;
+        if (a === 'gemini-3.1-flash-lite') return -1;
+        if (b === 'gemini-3.1-flash-lite') return 1;
+        if (a.includes('3.5') && !b.includes('3.5')) return -1;
+        if (b.includes('3.5') && !a.includes('3.5')) return 1;
+        if (a.includes('3.1') && !b.includes('3.1')) return -1;
+        if (b.includes('3.1') && !a.includes('3.1')) return 1;
         const aFlash = a.includes('flash') ? 1 : 0;
         const bFlash = b.includes('flash') ? 1 : 0;
         if (aFlash !== bFlash) return bFlash - aFlash;
-        if (a.includes('2.5') && !b.includes('2.5')) return -1;
-        if (b.includes('2.5') && !a.includes('2.5')) return 1;
-        if (a.includes('2.0') && !b.includes('2.0')) return -1;
-        if (b.includes('2.0') && !a.includes('2.0')) return 1;
-        if (a.includes('1.5') && !b.includes('1.5')) return -1;
-        if (b.includes('1.5') && !a.includes('1.5')) return 1;
         return a.localeCompare(b);
       });
       return candidateList;
@@ -482,10 +491,10 @@ export async function testGeminiLatency(
 
   let userMsg = 'Không thể kết nối với các mô hình Gemini.';
 
-  if ((rawMsg.includes('400') || rawMsg.includes('403')) && (rawMsg.includes('key') || rawMsg.includes('Key') || rawMsg.includes('API_KEY') || rawMsg.includes('INVALID_ARGUMENT') || rawMsg.includes('API key not valid'))) {
+  if (rawMsg.includes('404') || rawMsg.includes('NOT_FOUND') || rawMsg.includes('not found') || httpCode === 404) {
+    userMsg = 'Mô hình đã ngừng. Vui lòng chọn mô hình khác (ví dụ: gemini-3.5-flash).';
+  } else if ((rawMsg.includes('400') || rawMsg.includes('403')) && (rawMsg.includes('key') || rawMsg.includes('Key') || rawMsg.includes('API_KEY') || rawMsg.includes('INVALID_ARGUMENT') || rawMsg.includes('API key not valid'))) {
     userMsg = 'API key sai hoặc không có quyền truy cập.';
-  } else if (rawMsg.includes('404') || rawMsg.includes('NOT_FOUND')) {
-    userMsg = `Mô hình ${activeInfo.modelName || DEFAULT_MODEL} không còn dùng được hoặc không tồn tại.`;
   } else if (rawMsg.includes('429') || rawMsg.includes('Quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
     userMsg = 'Hệ thống đang quá tải hoặc hết Quota, vui lòng thử lại sau.';
   } else if (rawMsg.includes('503') || rawMsg.includes('UNAVAILABLE') || rawMsg.includes('overloaded') || rawMsg.includes('high demand')) {
@@ -580,10 +589,10 @@ async function callGeminiApi(
     }
   }
 
-  // Model selection: Use configured admin model if set, otherwise default to gemini-1.5-flash-latest
+  // Model selection: Use configured admin model if set, otherwise default to DEFAULT_MODEL (gemini-3.5-flash)
   const adminModel = getAdminSelectedModel();
   const cachedModel = getCachedWorkingModel();
-  let selectedModel = DEFAULT_MODEL; // 'gemini-1.5-flash-latest'
+  let selectedModel = DEFAULT_MODEL; // 'gemini-3.5-flash'
 
   if (adminModel && isTextOnlyGeminiModel(adminModel)) {
     selectedModel = adminModel;
@@ -603,7 +612,9 @@ async function callGeminiApi(
     console.error(`[Gemini API Call Failed - Model: ${selectedModel}]`, err);
 
     let userMsg = `Lỗi gọi Gemini API (${selectedModel}): ${sanitizedMsg}`;
-    if (rawMsg.includes('429') || rawMsg.includes('Quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
+    if (rawMsg.includes('404') || rawMsg.includes('NOT_FOUND') || rawMsg.includes('not found') || err?.status === 404) {
+      userMsg = `[Mô hình đã ngừng] Mô hình ${selectedModel} đã ngừng hoạt động. Vui lòng chuyển sang mô hình Gemini mới hơn như gemini-3.5-flash.`;
+    } else if (rawMsg.includes('429') || rawMsg.includes('Quota') || rawMsg.includes('RESOURCE_EXHAUSTED')) {
       userMsg = `[Hạn mức API] Mô hình ${selectedModel} đã vượt quá giới hạn lượt gọi (429 Quota Exceeded). Chi tiết: ${sanitizedMsg}`;
     } else if (rawMsg.includes('API key not valid') || rawMsg.includes('API_KEY_INVALID') || rawMsg.includes('403') || rawMsg.includes('400')) {
       userMsg = `[Khóa API] Gemini API Key không hợp lệ hoặc không có quyền truy cập mô hình ${selectedModel}. Chi tiết: ${sanitizedMsg}`;
