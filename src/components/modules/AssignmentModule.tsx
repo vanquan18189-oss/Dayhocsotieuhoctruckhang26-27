@@ -64,7 +64,7 @@ import { getLocalCachedQuestions, QUESTIONS_CACHE_KEY, saveQuestionsBatchToFires
 import { useScoreSort } from '../../lib/useScoreSort';
 import { StudentAssignmentModule } from './StudentAssignmentModule';
 import { getCurrentTeacherProfile, resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
-import { getStudentsFromLocalStorage, getClassStudentCount, fetchAllStudentsFromFirestore, getAllStudentsFromLocalStorage, getStandardClassName, normalizeClassKey } from '../../services/studentStorageService';
+import { getStudentsFromLocalStorage, getClassStudentCount, fetchAllStudentsFromFirestore, getAllStudentsFromLocalStorage, getStandardClassName, normalizeClassKey, fetchClassStudentsFromFirestore, subscribeToFirestoreClassStudents } from '../../services/studentStorageService';
 import { auth, db } from '../../services/firebase';
 import { doc, onSnapshot, getDoc, setDoc } from 'firebase/firestore';
 import { trackedSetDoc } from '../../services/firestoreWriteTracker';
@@ -214,6 +214,30 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
       setAssignmentSubmissions(subs);
     });
   }, [detailAssignment?.id]);
+
+  const [currentAssignmentRoster, setCurrentAssignmentRoster] = useState<any[]>([]);
+
+  // Real-time Firestore roster listener for the currently tracked assignment's class
+  useEffect(() => {
+    if (!detailAssignment?.targetClass) {
+      setCurrentAssignmentRoster([]);
+      return;
+    }
+    const targetCls = detailAssignment.targetClass;
+    fetchClassStudentsFromFirestore(targetCls).then((stList) => {
+      if (stList && stList.length > 0) {
+        setCurrentAssignmentRoster(stList);
+      }
+    }).catch(() => {});
+
+    const unsub = subscribeToFirestoreClassStudents(targetCls, (stList) => {
+      if (stList && stList.length > 0) {
+        setCurrentAssignmentRoster(stList);
+      }
+    });
+
+    return () => unsub();
+  }, [detailAssignment?.targetClass]);
 
   // Tracking modal states
   const [trackingTab, setTrackingTab] = useState<'all' | 'needs_action' | 'support'>('all');
@@ -486,12 +510,14 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
 
     // Get authentic class students roster or default fallback
     const targetClassName = detailAssignment.targetClass || 'Lớp 3A';
-    let classStudentsRoster = getStudentsFromLocalStorage(targetClassName) || [];
+    let classStudentsRoster = currentAssignmentRoster.length > 0
+      ? currentAssignmentRoster
+      : (getStudentsFromLocalStorage(targetClassName) || []);
     
     if (classStudentsRoster.length === 0 && typeof window !== 'undefined') {
       try {
         const allLocal = getAllStudentsFromLocalStorage();
-        const found = allLocal[getStandardClassName(targetClassName)] || allLocal[normalizeClassKey(targetClassName)];
+        const found = allLocal[getStandardClassName(targetClassName)] || allLocal[normalizeClassKey(targetClassName)] || allLocal[targetClassName];
         if (found && Array.isArray(found) && found.length > 0) {
           classStudentsRoster = found;
         }
@@ -655,9 +681,12 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
           return 'fail';
         });
 
+        const realStudentName = (submission && (submission.studentName || submission.name || submission.fullName)) || st.fullName || st.name || `Học sinh ${idx + 1}`;
+        const realStudentCode = (submission && (submission.maHs || submission.studentCode || submission.code)) || st.code || st.id || `st-${idx + 1}`;
+
         return {
-          code: st.code || `st-${idx + 1}`,
-          name: st.name || st.fullName || `Học sinh ${idx + 1}`,
+          code: realStudentCode,
+          name: realStudentName,
           answers,
           totalScore: rawScore,
           aiStatus: isPassed ? ('pass' as const) : ('fail' as const),
@@ -667,7 +696,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
       } else {
         return {
           code: st.code || `st-${idx + 1}`,
-          name: st.name || st.fullName || `Học sinh ${idx + 1}`,
+          name: st.fullName || st.name || `Học sinh ${idx + 1}`,
           answers: Array.from({ length: questionCount }).map(() => 'none' as const),
           totalScore: '-',
           aiStatus: 'none' as const,
@@ -676,7 +705,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
         };
       }
     });
-  }, [detailAssignment, submissionSyncTick]);
+  }, [detailAssignment, submissionSyncTick, currentAssignmentRoster]);
 
   const autoSyncedAssignmentsRef = useRef<Set<string>>(new Set());
 

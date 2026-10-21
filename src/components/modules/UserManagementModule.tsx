@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { UserAccount, UserRole, StudentRecord } from '../../types';
 import { PRIMARY_SCHOOL_SUBJECTS } from '../../services/mockData';
-import { STANDARD_GRADE_SUBJECTS } from '../../services/classStorageService';
+import { STANDARD_GRADE_SUBJECTS, extractGradeDigit, formatGradeStandard, fetchClassesForGrade } from '../../services/classStorageService';
 import { formatScore } from '../../utils/scoreUtils';
 import { groupAndCountErrors } from '../../services/firestoreWriteTracker';
 import { runSaveOperation, verifyServerDocWritten } from '../../utils/saveUtils';
@@ -704,16 +704,20 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
               
               if (!seenKeys.has(upperKey)) {
                 seenKeys.add(upperKey);
+                const rawGrade = (data.grade || '').trim();
+                const digit = extractGradeDigit(rawGrade) || extractGradeDigit(stdName) || extractGradeDigit(rawId);
+                const grade = digit ? `Khối ${digit}` : (rawGrade ? formatGradeStandard(rawGrade) : 'Khối 1');
+
                 cloudClasses.push({
                   id: upperKey,
-                  grade: data.grade || 'Khối 1',
+                  grade,
                   name: stdName,
                   room: data.room || '',
                   homeroomTeacher: data.homeroomTeacher || '',
                   homeroomTeacherId: data.homeroomTeacherId || '',
                   subjects: Array.isArray(data.subjects) && data.subjects.length > 0
                     ? data.subjects
-                    : (STANDARD_GRADE_SUBJECTS[data.grade || 'Khối 1'] || PRIMARY_SCHOOL_SUBJECTS).map((s) => ({ isVisible: true, subjectName: s }))
+                    : (STANDARD_GRADE_SUBJECTS[grade] || PRIMARY_SCHOOL_SUBJECTS).map((s) => ({ isVisible: true, subjectName: s }))
                 });
               }
             });
@@ -728,7 +732,7 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
         }
       );
 
-      // 2. Real-time listener for 'class_rosters' collection (robust dual-key normalization)
+      // 2. Real-time listener for 'class_rosters' collection (robust dual-key normalization & class list fallback)
       unsubRosters = onSnapshot(
         collection(db, 'class_rosters'),
         (snapshot) => {
@@ -740,6 +744,33 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
               if (rawName) {
                 const stdName = getStandardClassName(rawName);
                 const upperKey = normalizeClassKey(rawName);
+                const rawGrade = (data.grade || '').trim();
+                const digit = extractGradeDigit(rawGrade) || extractGradeDigit(stdName) || extractGradeDigit(rawName) || extractGradeDigit(docSnap.id);
+                const grade = digit ? `Khối ${digit}` : (rawGrade ? formatGradeStandard(rawGrade) : 'Khối 1');
+
+                // If not yet in classesList, add this class so classes existing in class_rosters are displayed
+                setClassesList((prevList) => {
+                  const exists = prevList.some(c => {
+                    const cKey = normalizeClassKey(c.name);
+                    return cKey === upperKey || c.id === upperKey;
+                  });
+                  if (!exists) {
+                    const newClass: ClassConfig = {
+                      id: upperKey,
+                      grade,
+                      name: stdName,
+                      room: data.room || '',
+                      homeroomTeacher: data.homeroomTeacher || '',
+                      homeroomTeacherId: data.homeroomTeacherId || '',
+                      subjects: (STANDARD_GRADE_SUBJECTS[grade] || PRIMARY_SCHOOL_SUBJECTS).map((s) => ({ isVisible: true, subjectName: s }))
+                    };
+                    const updated = [...prevList, newClass];
+                    saveClassesToLocalStorage(updated);
+                    return updated;
+                  }
+                  return prevList;
+                });
+
                 const studentList = Array.isArray(data.students)
                   ? data.students
                   : (Array.isArray(data.studentList) ? data.studentList : (Array.isArray(data.roster) ? data.roster : []));
@@ -747,6 +778,16 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
                   const cleaned = deduplicateAndNormalizeStudents(studentList as StudentRecord[], stdName);
                   cloudRosters[stdName] = cleaned;
                   cloudRosters[upperKey] = cleaned;
+                  cloudRosters[upperKey.toLowerCase()] = cleaned;
+                  cloudRosters[stdName.toLowerCase()] = cleaned;
+                  if (docSnap.id) {
+                    cloudRosters[docSnap.id] = cleaned;
+                    cloudRosters[docSnap.id.toLowerCase()] = cleaned;
+                  }
+                  if (data.classId) {
+                    cloudRosters[String(data.classId)] = cleaned;
+                    cloudRosters[String(data.classId).toLowerCase()] = cleaned;
+                  }
                 }
               }
             });
@@ -1496,23 +1537,24 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
       return { total: 0, male: 0, female: 0 };
     }
 
-    const gradeNum = gradeInput.replace(/[^0-9]/g, '');
+    const gradeNum = extractGradeDigit(gradeInput) || gradeInput.replace(/[^0-9]/g, '');
     const gradeName = `Khối ${gradeNum}`;
 
     const classNamesSet = new Set<string>();
 
     // 1. Classes from classesList matching this grade
     classesList.forEach((c) => {
-      const cGradeNum = (c.grade || '').replace(/[^0-9]/g, '');
-      if (cGradeNum === gradeNum || c.grade === gradeName || c.grade === gradeInput) {
+      const cGradeNum = extractGradeDigit(c.grade) || extractGradeDigit(c.name) || extractGradeDigit(c.id);
+      if (cGradeNum === gradeNum || c.grade === gradeName || c.grade === gradeInput || c.grade === gradeNum) {
         if (c.name) classNamesSet.add(c.name);
+        if (c.id) classNamesSet.add(c.id);
       }
     });
 
     // 2. Scan studentDatabase keys matching gradeNum
     Object.keys(studentDatabase).forEach((key) => {
       const stdName = getStandardClassName(key);
-      const keyGradeNum = stdName.replace(/[^0-9]/g, '');
+      const keyGradeNum = extractGradeDigit(stdName) || extractGradeDigit(key);
       if (keyGradeNum === gradeNum) {
         classNamesSet.add(stdName);
       }
@@ -1754,17 +1796,37 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
 
   // Current block details
   const activeBlockConfig = BLOCKS_CONFIG.find((b) => b.id === selectedBlock);
-  const activeBlockClasses = hasYearEnrollments ? classesList.filter((c) => c.grade === activeBlockConfig?.name) : [];
+  const activeBlockClasses = useMemo(() => {
+    if (!hasYearEnrollments || !selectedBlock) return [];
+    const targetDigit = selectedBlock;
+    const targetName = activeBlockConfig?.name || `Khối ${targetDigit}`;
+    return classesList.filter((c) => {
+      const cGrade = c.grade || '';
+      const cDigit = extractGradeDigit(cGrade) || extractGradeDigit(c.name) || extractGradeDigit(c.id);
+      return (
+        cGrade === targetName ||
+        cGrade === targetDigit ||
+        (Boolean(targetDigit) && cDigit === targetDigit) ||
+        cGrade.toLowerCase() === targetName.toLowerCase() ||
+        cGrade.toLowerCase() === `khối ${targetDigit}`.toLowerCase()
+      );
+    });
+  }, [hasYearEnrollments, selectedBlock, activeBlockConfig, classesList]);
   const activeBlockDynamicStats = activeBlockConfig ? getBlockStats(activeBlockConfig.name) : { total: 0, male: 0, female: 0 };
 
   // Compute total dynamic stats for selected class
   const currentClassStudents = useMemo(() => {
     if (!selectedClass || !hasYearEnrollments) return [];
     if (selectedAcademicYear === '2026-2027') {
+      const stdName = getStandardClassName(selectedClass);
+      const upperKey = normalizeClassKey(selectedClass);
       return (
         studentDatabase[selectedClass] ||
-        studentDatabase[getStandardClassName(selectedClass)] ||
-        studentDatabase[normalizeClassKey(selectedClass)] ||
+        studentDatabase[stdName] ||
+        studentDatabase[upperKey] ||
+        studentDatabase[selectedClass.toLowerCase()] ||
+        studentDatabase[upperKey.toLowerCase()] ||
+        studentDatabase[stdName.toLowerCase()] ||
         []
       );
     }
@@ -2027,9 +2089,11 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                   {BLOCKS_CONFIG.map((block) => {
                     const bStats = getBlockStats(block.name);
-                    const blockClassesCount = classesList.filter(
-                      (c) => c.grade === block.name || (c.grade || '').replace(/[^0-9]/g, '') === block.id
-                    ).length;
+                    const blockClassesCount = classesList.filter((c) => {
+                      const cGrade = c.grade || '';
+                      const cDigit = extractGradeDigit(cGrade) || extractGradeDigit(c.name) || extractGradeDigit(c.id);
+                      return cDigit === block.id || cGrade === block.name || cGrade === block.id;
+                    }).length;
 
                     return (
                       <div

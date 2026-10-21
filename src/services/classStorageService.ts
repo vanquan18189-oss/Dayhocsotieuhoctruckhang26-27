@@ -59,20 +59,35 @@ export function subscribeRealtimeClasses(callback: (classes: SchoolClassItem[]) 
   }
 
   try {
-    const unsub = onSnapshot(collection(db, 'classes'), (snapshot) => {
-      if (!snapshot.empty) {
-        const classMap = new Map<string, SchoolClassItem>();
+    const classMap = new Map<string, SchoolClassItem>();
 
+    const emitMergedClasses = () => {
+      const list = Array.from(classMap.values());
+      if (list.length > 0) {
+        list.sort((a, b) => a.name.localeCompare(b.name, 'vi', { numeric: true }));
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('eduplay_classes_data', JSON.stringify(list));
+          }
+        } catch {}
+        callback(list);
+      } else {
+        callback([]);
+      }
+    };
+
+    // 1. Subscribe to 'classes' collection
+    const unsubClasses = onSnapshot(collection(db, 'classes'), (snapshot) => {
+      if (!snapshot.empty) {
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
           const rawId = (docSnap.id || data.id || data.classId || '').trim();
           const rawName = (data.name || data.className || rawId || '').trim();
           const name = formatClassName(rawName);
           const rawGrade = (data.grade || '').trim();
-          const digit = extractGradeDigit(rawGrade) || extractGradeDigit(name);
-          const grade = rawGrade || (digit ? `Khối ${digit}` : 'Khối 1');
+          const digit = extractGradeDigit(rawGrade) || extractGradeDigit(name) || extractGradeDigit(rawId);
+          const grade = digit ? `Khối ${digit}` : (rawGrade ? formatGradeStandard(rawGrade) : 'Khối 1');
           
-          // Normalized key for deduplication (e.g. "3C", "5D")
           const cleanSuffix = name.replace(/^Lớp\s*/i, '').trim().toUpperCase();
           const normalizedKey = cleanSuffix || rawId.toUpperCase();
           const standardId = normalizedKey;
@@ -88,13 +103,12 @@ export function subscribeRealtimeClasses(callback: (classes: SchoolClassItem[]) 
               : (STANDARD_GRADE_SUBJECTS[grade] || STANDARD_GRADE_SUBJECTS['Khối 5']).map(s => ({ isVisible: true, subjectName: s }))
           };
 
-          // If item already exists, merge fields favoring non-empty ones
           if (classMap.has(normalizedKey)) {
             const existing = classMap.get(normalizedKey)!;
             classMap.set(normalizedKey, {
               ...existing,
               name: existing.name || newItem.name,
-              grade: existing.grade || newItem.grade,
+              grade: newItem.grade || existing.grade,
               room: existing.room || newItem.room,
               homeroomTeacher: existing.homeroomTeacher || newItem.homeroomTeacher,
               subjects: (existing.subjects && existing.subjects.length > 0) ? existing.subjects : newItem.subjects
@@ -103,20 +117,50 @@ export function subscribeRealtimeClasses(callback: (classes: SchoolClassItem[]) 
             classMap.set(normalizedKey, newItem);
           }
         });
-
-        const list = Array.from(classMap.values());
-        if (list.length > 0) {
-          list.sort((a, b) => a.name.localeCompare(b.name, 'vi', { numeric: true }));
-          callback(list);
-          return;
-        }
+        emitMergedClasses();
       }
-      callback([]);
     }, (err) => {
       console.warn('Firestore classes subscription warning:', err);
-      callback([]);
     });
-    return unsub;
+
+    // 2. Subscribe to 'class_rosters' collection to catch classes defined only in rosters
+    const unsubRosters = onSnapshot(collection(db, 'class_rosters'), (rosterSnap) => {
+      if (!rosterSnap.empty) {
+        rosterSnap.forEach((docSnap) => {
+          const data = docSnap.data();
+          const rawId = (docSnap.id || data.id || data.classId || '').trim();
+          const rawName = (data.className || data.name || data.classKey || rawId || '').trim();
+          if (!rawName) return;
+
+          const name = formatClassName(rawName);
+          const cleanSuffix = name.replace(/^Lớp\s*/i, '').trim().toUpperCase();
+          const normalizedKey = cleanSuffix || rawId.toUpperCase();
+
+          const rawGrade = (data.grade || '').trim();
+          const digit = extractGradeDigit(rawGrade) || extractGradeDigit(name) || extractGradeDigit(rawId);
+          const grade = digit ? `Khối ${digit}` : (rawGrade ? formatGradeStandard(rawGrade) : 'Khối 1');
+
+          if (!classMap.has(normalizedKey)) {
+            classMap.set(normalizedKey, {
+              id: normalizedKey,
+              name,
+              grade,
+              room: data.room || '',
+              homeroomTeacher: data.homeroomTeacher || '',
+              subjects: (STANDARD_GRADE_SUBJECTS[grade] || STANDARD_GRADE_SUBJECTS['Khối 5']).map(s => ({ isVisible: true, subjectName: s }))
+            });
+          }
+        });
+        emitMergedClasses();
+      }
+    }, (err) => {
+      console.warn('Firestore class_rosters subscription warning in classStorage:', err);
+    });
+
+    return () => {
+      unsubClasses();
+      unsubRosters();
+    };
   } catch (err) {
     console.warn('Error subscribing to Firestore classes:', err);
     callback([]);
@@ -271,20 +315,27 @@ export function useClassesList() {
    * If grade is null/undefined/empty or "Tất cả các khối", returns all classes.
    */
   const getClassesForGrade = useMemo(() => {
-    return (gradeFilter?: string): SchoolClassItem[] => {
-      if (!gradeFilter || gradeFilter === 'Tất cả' || gradeFilter === 'Tất cả các khối' || gradeFilter === 'Tất cả Lớp') {
+    return (gradeFilter?: string | number): SchoolClassItem[] => {
+      if (!gradeFilter || gradeFilter === 'Tất cả' || gradeFilter === 'Tất cả các khối' || gradeFilter === 'Tất cả Lớp' || gradeFilter === 'all') {
         return classes;
       }
 
-      const targetDigit = extractGradeDigit(gradeFilter);
-      if (!targetDigit) return classes;
+      const targetDigit = extractGradeDigit(String(gradeFilter));
+      const filterLower = String(gradeFilter).trim().toLowerCase();
 
-      const filtered = classes.filter(c => {
-        const classDigit = extractGradeDigit(c.grade) || extractGradeDigit(c.name);
-        return classDigit === targetDigit;
+      return classes.filter(c => {
+        const classDigit = extractGradeDigit(c.grade) || extractGradeDigit(c.name) || extractGradeDigit(c.id);
+        if (targetDigit && classDigit) {
+          if (classDigit === targetDigit) return true;
+        }
+        const cGradeLower = (c.grade || '').trim().toLowerCase();
+        return (
+          cGradeLower === filterLower ||
+          cGradeLower === `khối ${filterLower}` ||
+          (c.name || '').trim().toLowerCase().includes(filterLower) ||
+          (c.id || '').trim().toLowerCase() === filterLower
+        );
       });
-
-      return filtered;
     };
   }, [classes]);
 
@@ -293,6 +344,151 @@ export function useClassesList() {
     loading,
     getClassesForGrade
   };
+}
+
+/**
+ * Lấy toàn bộ danh sách lớp học từ Firestore (kết hợp cả collection 'classes' và 'class_rosters')
+ */
+export async function fetchAllClassesFromFirestore(): Promise<SchoolClassItem[]> {
+  const classMap = new Map<string, SchoolClassItem>();
+
+  // Fallback to local storage if available
+  if (typeof window !== 'undefined') {
+    try {
+      const cached = localStorage.getItem('eduplay_classes_data');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((c: SchoolClassItem) => {
+            if (c && c.name) {
+              const cleanSuffix = c.name.replace(/^Lớp\s*/i, '').trim().toUpperCase();
+              classMap.set(cleanSuffix || c.id, c);
+            }
+          });
+        }
+      }
+    } catch {}
+  }
+
+  if (!db) {
+    return Array.from(classMap.values());
+  }
+
+  try {
+    // 1. Fetch from 'classes'
+    const snapClasses = await getDocs(collection(db, 'classes'));
+    if (!snapClasses.empty) {
+      snapClasses.forEach((docSnap) => {
+        const data = docSnap.data();
+        const rawId = (docSnap.id || data.id || data.classId || '').trim();
+        const rawName = (data.name || data.className || rawId || '').trim();
+        const name = formatClassName(rawName);
+        const rawGrade = (data.grade || '').trim();
+        const digit = extractGradeDigit(rawGrade) || extractGradeDigit(name) || extractGradeDigit(rawId);
+        const grade = digit ? `Khối ${digit}` : (rawGrade ? formatGradeStandard(rawGrade) : 'Khối 1');
+        
+        const cleanSuffix = name.replace(/^Lớp\s*/i, '').trim().toUpperCase();
+        const normalizedKey = cleanSuffix || rawId.toUpperCase();
+
+        const newItem: SchoolClassItem = {
+          id: normalizedKey,
+          name,
+          grade,
+          room: data.room || '',
+          homeroomTeacher: data.homeroomTeacher || '',
+          subjects: Array.isArray(data.subjects) && data.subjects.length > 0
+            ? data.subjects
+            : (STANDARD_GRADE_SUBJECTS[grade] || STANDARD_GRADE_SUBJECTS['Khối 5']).map(s => ({ isVisible: true, subjectName: s }))
+        };
+
+        if (classMap.has(normalizedKey)) {
+          const existing = classMap.get(normalizedKey)!;
+          classMap.set(normalizedKey, {
+            ...existing,
+            name: existing.name || newItem.name,
+            grade: newItem.grade || existing.grade,
+            room: existing.room || newItem.room,
+            homeroomTeacher: existing.homeroomTeacher || newItem.homeroomTeacher,
+            subjects: (existing.subjects && existing.subjects.length > 0) ? existing.subjects : newItem.subjects
+          });
+        } else {
+          classMap.set(normalizedKey, newItem);
+        }
+      });
+    }
+
+    // 2. Fetch from 'class_rosters'
+    const snapRosters = await getDocs(collection(db, 'class_rosters'));
+    if (!snapRosters.empty) {
+      snapRosters.forEach((docSnap) => {
+        const data = docSnap.data();
+        const rawId = (docSnap.id || data.id || data.classId || '').trim();
+        const rawName = (data.className || data.name || data.classKey || rawId || '').trim();
+        if (!rawName) return;
+
+        const name = formatClassName(rawName);
+        const cleanSuffix = name.replace(/^Lớp\s*/i, '').trim().toUpperCase();
+        const normalizedKey = cleanSuffix || rawId.toUpperCase();
+
+        const rawGrade = (data.grade || '').trim();
+        const digit = extractGradeDigit(rawGrade) || extractGradeDigit(name) || extractGradeDigit(rawId);
+        const grade = digit ? `Khối ${digit}` : (rawGrade ? formatGradeStandard(rawGrade) : 'Khối 1');
+
+        if (!classMap.has(normalizedKey)) {
+          classMap.set(normalizedKey, {
+            id: normalizedKey,
+            name,
+            grade,
+            room: data.room || '',
+            homeroomTeacher: data.homeroomTeacher || '',
+            subjects: (STANDARD_GRADE_SUBJECTS[grade] || STANDARD_GRADE_SUBJECTS['Khối 5']).map(s => ({ isVisible: true, subjectName: s }))
+          });
+        }
+      });
+    }
+
+    const list = Array.from(classMap.values());
+    list.sort((a, b) => a.name.localeCompare(b.name, 'vi', { numeric: true }));
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('eduplay_classes_data', JSON.stringify(list));
+      }
+    } catch {}
+    return list;
+  } catch (err) {
+    console.warn('Lỗi khi fetchAllClassesFromFirestore:', err);
+    return Array.from(classMap.values());
+  }
+}
+
+/**
+ * Truy vấn danh sách lớp theo khối linh hoạt (flexible matching) từ Firestore
+ * Hỗ trợ các định dạng: "Khối 4", "4", 4, "Lớp 4", "K4", "all", etc.
+ */
+export async function fetchClassesForGrade(gradeFilter?: string | number): Promise<SchoolClassItem[]> {
+  const allClasses = await fetchAllClassesFromFirestore();
+  if (!gradeFilter || gradeFilter === 'Tất cả' || gradeFilter === 'Tất cả các khối' || gradeFilter === 'Tất cả Lớp' || gradeFilter === 'all') {
+    return allClasses;
+  }
+
+  const targetDigit = extractGradeDigit(String(gradeFilter));
+  const filterStr = String(gradeFilter).trim().toLowerCase();
+
+  return allClasses.filter((c) => {
+    const cDigit = extractGradeDigit(c.grade) || extractGradeDigit(c.name) || extractGradeDigit(c.id);
+    if (targetDigit && cDigit) {
+      if (cDigit === targetDigit) return true;
+    }
+    const cGradeLower = (c.grade || '').trim().toLowerCase();
+    const cNameLower = (c.name || '').trim().toLowerCase();
+    const cIdLower = (c.id || '').trim().toLowerCase();
+    return (
+      cGradeLower === filterStr ||
+      cGradeLower === `khối ${filterStr}` ||
+      cNameLower.includes(filterStr) ||
+      cIdLower === filterStr
+    );
+  });
 }
 
 /**
@@ -337,6 +533,8 @@ export function getFilteredClassesForGrade(
   if (!Array.isArray(classes)) return { classesList: [], hasNoClassesInGrade: true };
 
   const normGrade = normalizeGradeKey(gradeFilter);
+  const targetDigit = extractGradeDigit(gradeFilter || '');
+  const filterLower = String(gradeFilter || '').trim().toLowerCase();
   const isAllGrades = !gradeFilter || 
     gradeFilter === 'Tất cả' || 
     gradeFilter === 'Tất cả các khối' || 
@@ -344,13 +542,19 @@ export function getFilteredClassesForGrade(
     normGrade === 'all' ||
     normGrade === '';
 
-  // 1. Lọc theo khối
+  // 1. Lọc theo khối linh hoạt (flexible matching)
   let matched = classes;
   if (!isAllGrades) {
     matched = classes.filter(c => {
       const cGrade = c.grade || inferGradeFromClassName(c.name);
+      const cDigit = extractGradeDigit(cGrade) || extractGradeDigit(c.name) || extractGradeDigit(c.id);
+      if (targetDigit && cDigit) {
+        if (cDigit === targetDigit) return true;
+      }
       const cNorm = normalizeGradeKey(cGrade);
-      return cNorm === normGrade;
+      if (cNorm === normGrade) return true;
+      const cLower = (cGrade || '').trim().toLowerCase();
+      return cLower === filterLower || cLower === `khối ${filterLower}`;
     });
   }
 

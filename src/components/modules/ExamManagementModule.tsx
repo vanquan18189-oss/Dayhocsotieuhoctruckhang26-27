@@ -2,7 +2,7 @@ import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, EXAM_TYPES, QUESTION_T
 import { getSubjectColorStyles } from '../../utils/subjectColors';
 import { formatScore, formatTotalScore, roundTotalScore, isSubjectWithScore, getQualitativeLevel, getQualitativeLabel, getCurrentSubmissionTimestamp, formatSubmissionDateTime } from '../../utils/scoreUtils';
 import { getTeachersFromLocalStorage, resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
-import { getStudentsFromLocalStorage, getClassStudentCount, deleteStudentFromClass, fetchAllStudentsFromFirestore, getAllStudentsFromLocalStorage, getStandardClassName, normalizeClassKey } from '../../services/studentStorageService';
+import { getStudentsFromLocalStorage, getClassStudentCount, deleteStudentFromClass, fetchAllStudentsFromFirestore, getAllStudentsFromLocalStorage, getStandardClassName, normalizeClassKey, fetchClassStudentsFromFirestore, subscribeToFirestoreClassStudents } from '../../services/studentStorageService';
 import { deleteAllExamsFromFirestore } from '../../services/examStorageService';
 import { subscribeAllExamSubmissions, subscribeAllAssignmentSubmissions, subscribeExamSubmissions, syncAllExamsSubmissionsCounts } from '../../services/submissionService';
 import { auth } from '../../services/firebase';
@@ -579,6 +579,29 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
   // Real-time map of submissions per examId from subcollection exams/{examId}/submissions
   const [liveExamSubmissionsDetails, setLiveExamSubmissionsDetails] = useState<Map<string, { count: number; subs: any[]; loaded: boolean }>>(new Map());
   const [liveTrackingSubmissions, setLiveTrackingSubmissions] = useState<any[]>([]);
+  const [currentExamRoster, setCurrentExamRoster] = useState<any[]>([]);
+
+  // Real-time Firestore roster listener for the currently tracked exam's class
+  useEffect(() => {
+    if (!trackingExam?.targetClass) {
+      setCurrentExamRoster([]);
+      return;
+    }
+    const targetCls = trackingExam.targetClass;
+    fetchClassStudentsFromFirestore(targetCls).then((stList) => {
+      if (stList && stList.length > 0) {
+        setCurrentExamRoster(stList);
+      }
+    }).catch(() => {});
+
+    const unsub = subscribeToFirestoreClassStudents(targetCls, (stList) => {
+      if (stList && stList.length > 0) {
+        setCurrentExamRoster(stList);
+      }
+    });
+
+    return () => unsub();
+  }, [trackingExam?.targetClass]);
 
   // Real-time Firestore submissions listener for the currently tracked exam
   useEffect(() => {
@@ -661,12 +684,14 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     const targetClassName = trackingExam.targetClass || 'Lớp 3A';
     const normalizedTargetClass = targetClassName.trim().toLowerCase().replace(/^lớp\s*/i, '');
 
-    let classStudentsRoster = getStudentsFromLocalStorage(targetClassName) || [];
+    let classStudentsRoster = currentExamRoster.length > 0
+      ? currentExamRoster
+      : (getStudentsFromLocalStorage(targetClassName) || []);
     
     if (classStudentsRoster.length === 0 && typeof window !== 'undefined') {
       try {
         const allLocal = getAllStudentsFromLocalStorage();
-        const found = allLocal[getStandardClassName(targetClassName)] || allLocal[normalizeClassKey(targetClassName)];
+        const found = allLocal[getStandardClassName(targetClassName)] || allLocal[normalizeClassKey(targetClassName)] || allLocal[targetClassName];
         if (found && Array.isArray(found) && found.length > 0) {
           classStudentsRoster = found;
         }
@@ -755,7 +780,6 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
 
     // 2. Map each student in roster to a submission
     const mapped: TrackingSubmissionStudent[] = classStudentsRoster.map((st, idx) => {
-      const stdClassKey = normalizeClassKey(targetClassName).toLowerCase();
       const stSddcn = (st.sddcn || st.studentPersistentId || '').trim().toLowerCase();
       const stCode = (st.code || '').trim().toLowerCase();
       const stId = (st.id || '').trim().toLowerCase();
@@ -776,7 +800,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         }
       }
 
-      // b. Fallback: by normalized displayCode / studentCode / id
+      // b. Fallback: by normalized displayCode / studentCode / id (STRICT: no blind index matching)
       if (!submission) {
         for (const [k, sub] of uniqueSubsMap.entries()) {
           if (matchedSubKeys.has(k)) continue;
@@ -787,8 +811,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
 
           if (
             (subCode && (subCode === stCode || subCode === stId)) ||
-            (cleanSubCode && (cleanSubCode === cleanStCode || cleanSubCode === cleanStId)) ||
-            subCode === `${stdClassKey}${idx + 1}`
+            (cleanSubCode && (cleanSubCode === cleanStCode || cleanSubCode === cleanStId))
           ) {
             submission = sub;
             matchedKey = k;
@@ -909,9 +932,12 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
 
         const isWarningState = gradingStatus === 'ai_failed' || gradingStatus === 'ai_uncertain';
 
+        const realStudentName = (submission && (submission.studentName || submission.name || submission.fullName)) || st.fullName || st.name || `Học sinh ${idx + 1}`;
+        const realStudentCode = (submission && (submission.maHs || submission.studentCode || submission.code)) || st.code || st.id || `st-${idx + 1}`;
+
         return {
-          id: st.code || st.id || `st-${idx + 1}`,
-          name: st.name || st.fullName || `Học sinh ${idx + 1}`,
+          id: realStudentCode,
+          name: realStudentName,
           badge: isWarningState ? 'CẦN CHÚ Ý' : undefined,
           answers,
           totalScore: roundedTotal,
@@ -925,7 +951,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       } else {
         return {
           id: st.code || st.id || `st-${idx + 1}`,
-          name: st.name || st.fullName || `Học sinh ${idx + 1}`,
+          name: st.fullName || st.name || `Học sinh ${idx + 1}`,
           answers: Array.from({ length: questionCount }).map(() => 'none' as const),
           totalScore: null,
           attempts: null,
@@ -936,13 +962,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       }
     });
 
-    mapped.sort((a, b) => {
-      const idA = String(a?.id || '');
-      const idB = String(b?.id || '');
-      return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
-    });
-
-    // 3. Collect unmatched submissions
+    // 3. Process remaining submissions in uniqueSubsMap
     const unmatchedList: Array<{
       id: string;
       sddcn: string;
@@ -961,14 +981,67 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         const normSubClass = subClass.toLowerCase().replace(/^lớp\s*/i, '');
         const subSddcn = String(sub.sddcn || sub.studentPersistentId || '').trim();
         const subName = String(sub.studentName || sub.name || sub.fullName || '(Không rõ họ tên)').trim();
+        const subCode = String(sub.displayCode || sub.studentCode || sub.code || sub.studentId || sub.id || '').trim();
 
+        // If submission belongs to this class, seamlessly merge into mapped
+        if (!normSubClass || normSubClass === normalizedTargetClass) {
+          matchedSubKeys.add(k);
+          const rawScore = sub.score !== undefined ? sub.score : (sub.totalScore !== undefined ? sub.totalScore : null);
+          let numScore: number | null = null;
+          if (typeof rawScore === 'number' && !isNaN(rawScore)) {
+            numScore = rawScore;
+          } else if (typeof rawScore === 'string') {
+            const matchNum = rawScore.match(/([\d\.]+)/);
+            numScore = matchNum ? parseFloat(matchNum[1]) : (isNaN(Number(rawScore)) ? null : Number(rawScore));
+          }
+
+          const subAnswers = sub.answers || sub.studentAnswers || sub.traLoi || sub.choices || {};
+          let correctCount = 0;
+          if (subAnswers && questionCount > 0) {
+            for (let qi = 0; qi < questionCount; qi++) {
+              const qItem = trackingExam.questions && trackingExam.questions[qi];
+              const rawChoice = subAnswers[qi] !== undefined ? subAnswers[qi] : (qItem?.id ? subAnswers[qItem.id] : undefined);
+              if (rawChoice !== undefined && rawChoice !== null && qItem) {
+                if (checkQuestionCorrectLocal(qItem, rawChoice)) correctCount++;
+              }
+            }
+            if (correctCount > 0 || Object.keys(subAnswers).length > 0) {
+              numScore = Math.round((correctCount / questionCount) * 10);
+            }
+          }
+          const roundedTotal = numScore !== null ? Math.round(numScore) : 0;
+          const answers = Array.from({ length: questionCount }).map((_, qi) => {
+            const qItem = trackingExam.questions && trackingExam.questions[qi];
+            const rawChoice = subAnswers ? (subAnswers[qi] !== undefined ? subAnswers[qi] : (qItem?.id ? subAnswers[qItem.id] : undefined)) : undefined;
+            if (rawChoice !== undefined && rawChoice !== null && qItem) {
+              return checkQuestionCorrectLocal(qItem, rawChoice) ? ('pass' as const) : ('fail' as const);
+            }
+            if (numScore !== null) {
+              const threshold = Math.round((numScore / 10) * questionCount);
+              return qi < threshold ? ('pass' as const) : ('fail' as const);
+            }
+            return 'fail' as const;
+          });
+
+          mapped.push({
+            id: subCode || sub.id || `st-auto-${mapped.length + 1}`,
+            name: subName !== '(Không rõ họ tên)' ? subName : (subCode || `Học sinh ${mapped.length + 1}`),
+            answers,
+            totalScore: roundedTotal,
+            attempts: sub.attempts || 1,
+            submittedTime: formatSubmissionDateTime(sub.submittedAt || sub.submittedTime || getCurrentSubmissionTimestamp()),
+            status: 'submitted' as const,
+            gradingStatus: 'ai_graded' as const
+          });
+          return;
+        }
+
+        // Truly unmatched submission (different class)
         let reason = 'Không tìm thấy học sinh trùng khớp trong danh sách lớp hiện tại';
         if (normSubClass && normSubClass !== normalizedTargetClass) {
           reason = `Lớp ghi trên bài làm ("${subClass}") khác lớp của đề thi ("${targetClassName}")`;
         } else if (subSddcn) {
           reason = `Mã định danh (sddcn: ${subSddcn}) không có trong danh sách lớp ${targetClassName}`;
-        } else if (subName && subName !== '(Không rõ họ tên)') {
-          reason = `Tên học sinh "${subName}" không có trong danh sách lớp ${targetClassName}`;
         }
 
         const rawScore = sub.score !== undefined ? sub.score : (sub.totalScore !== undefined ? sub.totalScore : null);
@@ -977,7 +1050,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         unmatchedList.push({
           id: String(sub.id || k),
           sddcn: subSddcn || '---',
-          studentCode: String(sub.displayCode || sub.studentCode || sub.code || sub.studentId || '---'),
+          studentCode: subCode || '---',
           studentName: subName,
           studentClass: subClass || '(Không ghi lớp)',
           score: scoreStr,
@@ -988,8 +1061,14 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       }
     });
 
+    mapped.sort((a, b) => {
+      const idA = String(a?.id || '');
+      const idB = String(b?.id || '');
+      return idA.localeCompare(idB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
     return { trackingStudentsList: mapped, unmatchedSubmissions: unmatchedList };
-  }, [trackingExam, liveTrackingSubmissions, liveExamSubmissionsDetails, submissionsVersion]);
+  }, [trackingExam, liveTrackingSubmissions, liveExamSubmissionsDetails, submissionsVersion, currentExamRoster]);
 
   const filteredTrackingSubmissions = useMemo(() => {
     if (trackingFilter === 'need_manual') {

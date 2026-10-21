@@ -798,6 +798,8 @@ export async function syncClassStudentsToFirestore(
 /**
  * Fetch students of a class from Firestore
  */
+export { fetchClassesForGrade, fetchAllClassesFromFirestore } from './classStorageService';
+
 /**
  * Fetch students of a class from Firestore (Strictly real data only, returns [] if empty)
  */
@@ -808,30 +810,76 @@ export async function fetchClassStudentsFromFirestore(className: string): Promis
     const stdName = getStandardClassName(className);
     const classKey = normalizeClassKey(className);
 
-    // 1. Try class_rosters doc by classKey, lowercase key, or stdName
-    let rosterRef = doc(db, 'class_rosters', classKey);
-    let docSnap = await getDoc(rosterRef);
+    // 1. Try class_rosters doc by classKey, lowercase key, stdName, or className
+    const candidateDocIds = [
+      classKey,
+      classKey.toLowerCase(),
+      stdName,
+      className.trim(),
+      className.trim().toLowerCase(),
+      className.trim().replace(/^Lớp\s*/i, '').trim(),
+      className.trim().replace(/^Lớp\s*/i, '').trim().toLowerCase()
+    ];
 
-    if (!docSnap.exists() && classKey !== classKey.toLowerCase()) {
-      rosterRef = doc(db, 'class_rosters', classKey.toLowerCase());
-      docSnap = await getDoc(rosterRef);
+    for (const candId of candidateDocIds) {
+      if (!candId) continue;
+      try {
+        const rosterRef = doc(db, 'class_rosters', candId);
+        const docSnap = await getDoc(rosterRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const studentList = Array.isArray(data?.students)
+            ? data.students
+            : (Array.isArray(data?.studentList) ? data.studentList : (Array.isArray(data?.roster) ? data.roster : []));
+          if (Array.isArray(studentList) && studentList.length > 0) {
+            const cleaned = deduplicateAndNormalizeStudents(studentList as StudentRecord[], stdName);
+            saveStudentsToLocalStorage(className, cleaned);
+            saveStudentsToLocalStorage(stdName, cleaned);
+            saveStudentsToLocalStorage(classKey, cleaned);
+            return cleaned;
+          }
+        }
+      } catch {}
     }
 
-    if (!docSnap.exists()) {
-      rosterRef = doc(db, 'class_rosters', stdName);
-      docSnap = await getDoc(rosterRef);
-    }
+    // 1b. Fallback: scan all documents in 'class_rosters' collection by classId, className, classKey, or id
+    try {
+      const rostersSnap = await getDocs(collection(db, 'class_rosters'));
+      if (!rostersSnap.empty) {
+        const cleanReq = className.trim().toLowerCase().replace(/^lớp\s*/i, '');
+        const cleanStd = stdName.trim().toLowerCase().replace(/^lớp\s*/i, '');
+        const cleanKey = classKey.toLowerCase();
 
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      const studentList = Array.isArray(data?.students)
-        ? data.students
-        : (Array.isArray(data?.studentList) ? data.studentList : (Array.isArray(data?.roster) ? data.roster : []));
-      if (Array.isArray(studentList) && studentList.length > 0) {
-        const cleaned = deduplicateAndNormalizeStudents(studentList as StudentRecord[], className);
-        saveStudentsToLocalStorage(className, cleaned);
-        return cleaned;
+        for (const docSnap of rostersSnap.docs) {
+          const data = docSnap.data();
+          const docIdClean = docSnap.id.trim().toLowerCase().replace(/^lớp\s*/i, '');
+          const cIdClean = String(data.classId || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
+          const cNameClean = String(data.className || data.name || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
+          const cKeyClean = String(data.classKey || '').trim().toLowerCase();
+
+          const isMatch = (
+            docIdClean === cleanReq || docIdClean === cleanStd || docIdClean === cleanKey ||
+            cIdClean === cleanReq || cIdClean === cleanStd || cIdClean === cleanKey ||
+            cNameClean === cleanReq || cNameClean === cleanStd || cNameClean === cleanKey ||
+            cKeyClean === cleanKey || cKeyClean === cleanReq
+          );
+
+          if (isMatch) {
+            const studentList = Array.isArray(data?.students)
+              ? data.students
+              : (Array.isArray(data?.studentList) ? data.studentList : (Array.isArray(data?.roster) ? data.roster : []));
+            if (Array.isArray(studentList) && studentList.length > 0) {
+              const cleaned = deduplicateAndNormalizeStudents(studentList as StudentRecord[], stdName);
+              saveStudentsToLocalStorage(className, cleaned);
+              saveStudentsToLocalStorage(stdName, cleaned);
+              saveStudentsToLocalStorage(classKey, cleaned);
+              return cleaned;
+            }
+          }
+        }
       }
+    } catch (e) {
+      console.warn('Lỗi scan class_rosters fallback:', e);
     }
 
     // 2. Fallback: Query 'students' collection directly by className or classId
@@ -862,6 +910,8 @@ export async function fetchClassStudentsFromFirestore(className: string): Promis
         if (foundStudents.length > 0) {
           const cleaned = deduplicateAndNormalizeStudents(foundStudents, className);
           saveStudentsToLocalStorage(className, cleaned);
+          saveStudentsToLocalStorage(stdName, cleaned);
+          saveStudentsToLocalStorage(classKey, cleaned);
           return cleaned;
         }
       }
@@ -907,8 +957,21 @@ export async function fetchAllStudentsFromFirestore(): Promise<Record<string, St
             const cleaned = deduplicateAndNormalizeStudents(studentList as StudentRecord[], stdName);
             allRosters[stdName] = cleaned;
             allRosters[upperKey] = cleaned;
+            allRosters[upperKey.toLowerCase()] = cleaned;
+            allRosters[stdName.toLowerCase()] = cleaned;
+            allRosters[rawName] = cleaned;
+            allRosters[rawName.toLowerCase()] = cleaned;
+            if (docSnap.id) {
+              allRosters[docSnap.id] = cleaned;
+              allRosters[docSnap.id.toLowerCase()] = cleaned;
+            }
+            if (data.classId) {
+              allRosters[String(data.classId)] = cleaned;
+              allRosters[String(data.classId).toLowerCase()] = cleaned;
+            }
             try {
               localStorage.setItem(`eduplay_students_${upperKey}`, JSON.stringify(cleaned));
+              localStorage.setItem(`eduplay_students_${upperKey.toLowerCase()}`, JSON.stringify(cleaned));
             } catch {}
           }
         }
@@ -939,6 +1002,8 @@ export async function fetchAllStudentsFromFirestore(): Promise<Record<string, St
           const cleaned = deduplicateAndNormalizeStudents(Array.from(mergedMap.values()), stdName);
           allRosters[stdName] = cleaned;
           allRosters[upperKey] = cleaned;
+          allRosters[upperKey.toLowerCase()] = cleaned;
+          allRosters[stdName.toLowerCase()] = cleaned;
         });
       }
     } catch {}
@@ -1018,6 +1083,7 @@ export async function fetchClassStatistics(
       const gName = `Khối ${gNum}`;
       if (statsMap[gName]) {
         statsMap[gradeInput] = statsMap[gName];
+        statsMap[gNum] = statsMap[gName];
       }
     }
   } catch (err) {
