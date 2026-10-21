@@ -54,7 +54,7 @@ import { SUBJECTS, GRADES, CLASSES_BY_GRADE, ALL_CLASSES, QUESTION_TYPES, normal
 import { useClassesList } from '../../services/classStorageService';
 import { HomeworkAssignment, AssignmentSubmission, UserRole, QuestionItem } from '../../types';
 import { runSaveOperation } from '../../utils/saveUtils';
-import { saveAssignmentSubmission, subscribeSubmissions, subscribeAllAssignmentSubmissions, subscribeAllExamSubmissions } from '../../services/submissionService';
+import { saveAssignmentSubmission, subscribeSubmissions, subscribeAllAssignmentSubmissions, subscribeAllExamSubmissions, subscribeExamSubmissions, syncAllAssignmentsSubmissionsCounts } from '../../services/submissionService';
 import { gradeSubmissionAI } from '../../services/geminiService';
 import { exportAssignmentResultsExcel } from '../../services/excelService';
 import { ManualQuestionBankModal } from './ManualQuestionBankModal';
@@ -252,9 +252,68 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
 
   // Real-time Firestore map for all assignment submissions (key: assignmentId -> Set<studentKey>)
   const [liveAssignmentSubmissionsMap, setLiveAssignmentSubmissionsMap] = useState<Map<string, Set<string>>>(new Map());
+  // Real-time map of submissions per assignment from subcollection assignments/{id}/submissions
+  const [liveAssignmentSubmissionsDetails, setLiveAssignmentSubmissionsDetails] = useState<Map<string, { count: number; subs: any[]; loaded: boolean }>>(new Map());
 
   // Listener for local storage updates, Firestore live snapshot & custom window events
   const [submissionSyncTick, setSubmissionSyncTick] = useState(0);
+
+  // Real-time Firestore onSnapshot listener for each assignment's subcollection
+  useEffect(() => {
+    if (!assignments || assignments.length === 0) return;
+
+    const unsubs: Array<() => void> = [];
+    const subscribed = new Set<string>();
+
+    assignments.forEach((as) => {
+      const candidates = [
+        as.id,
+        (as as any).originalAssignmentId,
+        (as as any).homeworkId,
+        as.id ? as.id.replace(/-class-.*$/, '') : ''
+      ].filter(Boolean) as string[];
+
+      candidates.forEach((candId) => {
+        const cleanId = candId.trim();
+        if (!cleanId || subscribed.has(cleanId)) return;
+        subscribed.add(cleanId);
+
+        const unsub = subscribeExamSubmissions(
+          cleanId,
+          (subs) => {
+            setLiveAssignmentSubmissionsDetails((prev) => {
+              const next = new Map(prev);
+              next.set(cleanId, {
+                count: subs.length,
+                subs,
+                loaded: true
+              });
+              next.set(cleanId.toLowerCase(), {
+                count: subs.length,
+                subs,
+                loaded: true
+              });
+              return next;
+            });
+            setSubmissionSyncTick((v) => v + 1);
+          }
+        );
+        unsubs.push(unsub);
+      });
+    });
+
+    return () => {
+      unsubs.forEach((u) => {
+        try { u(); } catch {}
+      });
+    };
+  }, [assignments]);
+
+  // Tự động đồng bộ số lượng bài nộp bài tập từ Firestore khi giáo viên mở hoặc tải lại trang
+  useEffect(() => {
+    if (!assignments || assignments.length === 0) return;
+    syncAllAssignmentsSubmissionsCounts(assignments).catch(console.warn);
+  }, [assignments]);
 
   useEffect(() => {
     const unsubAssign = subscribeAllAssignmentSubmissions((map) => {
@@ -312,20 +371,75 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     if (!as) return 0;
     const uniqueStudentKeys = new Set<string>();
 
-    const targetAsId = String(as.id || '').trim().toLowerCase();
-    const origAsId = String((as as any).originalAssignmentId || (as as any).homeworkId || '').trim().toLowerCase();
+    const targetAsId = String(as.id || '').trim();
+    const origAsId = String((as as any).originalAssignmentId || (as as any).homeworkId || '').trim();
     const rootAsId = targetAsId.replace(/-class-.*$/, '');
 
-    [targetAsId, origAsId, rootAsId].filter(Boolean).forEach(id => {
-      const liveSet = liveAssignmentSubmissionsMap.get(id);
-      if (liveSet) {
-        liveSet.forEach(k => uniqueStudentKeys.add(k));
+    // Class roster for matching
+    const targetCls = as.targetClass || '';
+    const normCls = targetCls.trim().toLowerCase().replace(/^lớp\s*/i, '');
+    const classRoster = getStudentsFromLocalStorage(targetCls) || [];
+    const rosterStudentKeys = new Set<string>();
+    classRoster.forEach((st: any) => {
+      [st.sddcn, st.studentPersistentId, st.code, st.id, st.name, st.fullName].forEach(k => {
+        if (k) rosterStudentKeys.add(String(k).trim().toLowerCase());
+      });
+    });
+
+    const isStudentInClass = (item: any): boolean => {
+      if (!normCls) return true;
+      const subCls = String(item.studentClass || item.classId || item.className || item.targetClass || item.lop || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
+      if (subCls && subCls === normCls) return true;
+      const studentKey = String(item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.code || item.id || '').trim().toLowerCase();
+      const studentName = String(item.studentName || item.name || item.fullName || '').trim().toLowerCase();
+      if (rosterStudentKeys.has(studentKey) || (studentName && rosterStudentKeys.has(studentName))) {
+        return true;
+      }
+      return !subCls;
+    };
+
+    // 1. Gather all candidate submissions from liveAssignmentSubmissionsDetails
+    const candIds = [
+      targetAsId,
+      targetAsId.toLowerCase(),
+      origAsId,
+      origAsId.toLowerCase(),
+      rootAsId,
+      rootAsId.toLowerCase()
+    ].filter(Boolean);
+
+    const seenCandKeys = new Set<string>();
+    candIds.forEach((cid) => {
+      if (seenCandKeys.has(cid)) return;
+      seenCandKeys.add(cid);
+      const detail = liveAssignmentSubmissionsDetails.get(cid);
+      if (detail && Array.isArray(detail.subs)) {
+        detail.subs.forEach((item: any) => {
+          if (!item) return;
+          if (!isStudentInClass(item)) return;
+          const k = String(item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.code || item.studentName || item.id || '').trim().toLowerCase();
+          if (k) uniqueStudentKeys.add(k);
+        });
       }
     });
 
+    // 2. liveAssignmentSubmissionsMap
+    candIds.forEach(id => {
+      const liveSet = liveAssignmentSubmissionsMap.get(id);
+      if (liveSet) {
+        liveSet.forEach(k => {
+          if (!normCls || rosterStudentKeys.size === 0 || rosterStudentKeys.has(k)) {
+            uniqueStudentKeys.add(k);
+          }
+        });
+      }
+    });
+
+    // 3. as.submissions
     const subs = Array.isArray(as.submissions) ? as.submissions : [];
     subs.forEach((s: any) => {
-      const k = (s.sddcn || s.studentId || s.maHs || s.studentName || '').trim().toLowerCase();
+      if (!isStudentInClass(s)) return;
+      const k = String(s.sddcn || s.studentPersistentId || s.studentId || s.maHs || s.studentName || '').trim().toLowerCase();
       if (k) uniqueStudentKeys.add(k);
     });
 
@@ -333,6 +447,24 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
       as.submittedIds.forEach((id: string) => {
         if (id) uniqueStudentKeys.add(id.trim().toLowerCase());
       });
+    }
+
+    // 4. LocalStorage caches
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(`eduplay_exam_subs_${as.id}`);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) {
+            list.forEach((item: any) => {
+              if (isStudentInClass(item)) {
+                const k = String(item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.code || item.studentName || '').trim().toLowerCase();
+                if (k) uniqueStudentKeys.add(k);
+              }
+            });
+          }
+        }
+      } catch {}
     }
 
     const computed = uniqueStudentKeys.size;
@@ -343,7 +475,7 @@ export const AssignmentModule: React.FC<AssignmentModuleProps> = ({
     );
 
     return Math.max(computed, explicit);
-  }, [liveAssignmentSubmissionsMap]);
+  }, [liveAssignmentSubmissionsDetails, liveAssignmentSubmissionsMap]);
 
   // Dynamic tracking students derived from detailAssignment submissions and class roster
   const trackingStudentsList = useMemo(() => {

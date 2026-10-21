@@ -4,7 +4,7 @@ import { formatScore, formatTotalScore, roundTotalScore, isSubjectWithScore, get
 import { getTeachersFromLocalStorage, resolveCurrentTeacherProfile } from '../../services/teacherStorageService';
 import { getStudentsFromLocalStorage, getClassStudentCount, deleteStudentFromClass, fetchAllStudentsFromFirestore, getAllStudentsFromLocalStorage, getStandardClassName, normalizeClassKey } from '../../services/studentStorageService';
 import { deleteAllExamsFromFirestore } from '../../services/examStorageService';
-import { subscribeAllExamSubmissions, subscribeAllAssignmentSubmissions, subscribeExamSubmissions } from '../../services/submissionService';
+import { subscribeAllExamSubmissions, subscribeAllAssignmentSubmissions, subscribeExamSubmissions, syncAllExamsSubmissionsCounts } from '../../services/submissionService';
 import { auth } from '../../services/firebase';
 import { collection, onSnapshot, doc, getDocFromServer } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
@@ -1790,8 +1790,7 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
               return next;
             });
             setSubmissionsVersion((v) => v + 1);
-          },
-          exam.targetClass
+          }
         );
         unsubs.push(unsub);
       });
@@ -1804,6 +1803,12 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     };
   }, [normalizedExams]);
 
+  // Tự động đồng bộ chính xác số lượng bài nộp từ Firestore khi giáo viên mở hoặc tải lại trang
+  useEffect(() => {
+    if (!normalizedExams || normalizedExams.length === 0) return;
+    syncAllExamsSubmissionsCounts(normalizedExams).catch(console.warn);
+  }, [normalizedExams]);
+
   const getExamSubmissionCount = useCallback((exam: ExamPaper): number => {
     if (!exam) return 0;
     const subMap = new Map<string, boolean>();
@@ -1811,42 +1816,69 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
     const targetOriginalId = String(exam.originalExamId || '').trim();
     const rootId = targetExamId.replace(/-class-.*$/, '');
 
-    // 1. Primary: Read real-time onSnapshot submissions from exams/{examId}/submissions
-    const liveDetail = liveExamSubmissionsDetails.get(targetExamId) ||
-                       (targetOriginalId ? liveExamSubmissionsDetails.get(targetOriginalId) : undefined) ||
-                       (rootId ? liveExamSubmissionsDetails.get(rootId) : undefined) ||
-                       liveExamSubmissionsDetails.get(targetExamId.toLowerCase());
+    // Class roster và danh sách học sinh của lớp để đối soát chính xác học sinh
+    const targetCls = exam.targetClass || '';
+    const examCls = targetCls.trim().toLowerCase().replace(/^lớp\s*/i, '');
+    const classRoster = getStudentsFromLocalStorage(targetCls) || [];
+    const rosterStudentKeys = new Set<string>();
+    classRoster.forEach((st: any) => {
+      [st.sddcn, st.studentPersistentId, st.code, st.id, st.name, st.fullName].forEach(k => {
+        if (k) rosterStudentKeys.add(String(k).trim().toLowerCase());
+      });
+    });
 
-    if (liveDetail && liveDetail.loaded) {
-      if (exam.targetClass && liveDetail.subs && liveDetail.subs.length > 0) {
-        const examCls = String(exam.targetClass).trim().toLowerCase().replace(/^lớp\s*/i, '');
-        const matchedSubs = liveDetail.subs.filter((s: any) => {
-          const subCls = String(s.studentClass || s.classId || s.className || s.targetClass || s.lop || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
-          return !subCls || subCls === examCls;
-        });
-        if (matchedSubs.length > 0) {
-          return matchedSubs.length;
-        }
+    const isStudentInClass = (item: any): boolean => {
+      if (!examCls) return true;
+      const subCls = String(item.studentClass || item.classId || item.className || item.targetClass || item.lop || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
+      if (subCls && subCls === examCls) return true;
+      const studentKey = String(item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.code || item.id || '').trim().toLowerCase();
+      const studentName = String(item.studentName || item.name || item.fullName || '').trim().toLowerCase();
+      if (rosterStudentKeys.has(studentKey) || (studentName && rosterStudentKeys.has(studentName))) {
+        return true;
       }
-      return liveDetail.count;
-    }
+      return !subCls;
+    };
 
-    // 2. Fallback when onSnapshot not loaded yet:
-    // "Dùng submissionsCount trên tài liệu đề làm dự phòng khi chưa tải xong."
-    const explicitCount = Math.max(
-      typeof exam.submissionsCount === 'number' ? exam.submissionsCount : 0,
-      typeof (exam as any).completedCount === 'number' ? (exam as any).completedCount : 0,
-      typeof (exam as any).submittedCount === 'number' ? (exam as any).submittedCount : 0
-    );
+    // 1. Primary: Thu thập bài nộp realtime từ tất cả các candidate IDs (targetExamId, targetOriginalId, rootId)
+    const candIds = [
+      targetExamId,
+      targetExamId.toLowerCase(),
+      targetOriginalId,
+      targetOriginalId.toLowerCase(),
+      rootId,
+      rootId.toLowerCase()
+    ].filter(Boolean);
 
-    // 3. Fallback to liveExamSubmissionsMap / local caches
-    [targetExamId.toLowerCase(), targetOriginalId.toLowerCase(), rootId.toLowerCase()].filter(Boolean).forEach(id => {
-      const liveSet = liveExamSubmissionsMap.get(id);
-      if (liveSet) {
-        liveSet.forEach(k => subMap.set(k, true));
+    const seenLiveCand = new Set<string>();
+    candIds.forEach((cid) => {
+      if (seenLiveCand.has(cid)) return;
+      seenLiveCand.add(cid);
+      const detail = liveExamSubmissionsDetails.get(cid);
+      if (detail && Array.isArray(detail.subs)) {
+        detail.subs.forEach((item) => {
+          if (!item) return;
+          if (!isStudentInClass(item)) return;
+          const studentId = String(
+            item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.studentName || item.name || item.id || ''
+          ).trim().toLowerCase();
+          if (studentId) subMap.set(studentId, true);
+        });
       }
     });
 
+    // 2. liveExamSubmissionsMap
+    candIds.forEach(id => {
+      const liveSet = liveExamSubmissionsMap.get(id);
+      if (liveSet) {
+        liveSet.forEach(k => {
+          if (!examCls || rosterStudentKeys.size === 0 || rosterStudentKeys.has(k)) {
+            subMap.set(k, true);
+          }
+        });
+      }
+    });
+
+    // 3. Fallback to processSub on array submissions & local caches
     const processSub = (item: any) => {
       if (!item) return;
       const rawSubId = item.testId ?? item.examId ?? item.targetExamId ?? item.targetId ?? item.assignmentId ?? item.id;
@@ -1854,24 +1886,15 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
       const subRootId = explicitExamId.replace(/-class-.*$/, '');
 
       const isMatch = Boolean(
-        explicitExamId && (
-          explicitExamId === targetExamId.toLowerCase() ||
-          (targetOriginalId && explicitExamId === targetOriginalId.toLowerCase()) ||
-          (rootId && (explicitExamId === rootId.toLowerCase() || subRootId === rootId.toLowerCase())) ||
-          (item.exam?.id && String(item.exam.id).trim().toLowerCase() === targetExamId.toLowerCase())
-        )
+        !explicitExamId ||
+        explicitExamId === targetExamId.toLowerCase() ||
+        (targetOriginalId && explicitExamId === targetOriginalId.toLowerCase()) ||
+        (rootId && (explicitExamId === rootId.toLowerCase() || subRootId === rootId.toLowerCase())) ||
+        (item.exam?.id && String(item.exam.id).trim().toLowerCase() === targetExamId.toLowerCase())
       );
-      if (!isMatch && explicitExamId) {
-        return;
-      }
+      if (!isMatch) return;
 
-      if (exam.targetClass) {
-        const examCls = String(exam.targetClass).trim().toLowerCase().replace(/^lớp\s*/i, '');
-        const subCls = String(item.studentClass || item.classId || item.className || item.targetClass || item.lop || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
-        if (subCls && examCls && subCls !== examCls) {
-          return;
-        }
-      }
+      if (!isStudentInClass(item)) return;
 
       const studentId = (item.sddcn || item.studentPersistentId || item.studentId || item.maHs || item.studentCode || item.studentName || item.name || 'unknown').toString().trim().toLowerCase();
       subMap.set(studentId, true);
@@ -1904,6 +1927,18 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         } catch {}
       }
 
+      if (targetOriginalId && targetOriginalId !== exam.id && targetOriginalId !== rootId) {
+        try {
+          const origSubsRaw = localStorage.getItem(`eduplay_exam_subs_${targetOriginalId}`);
+          if (origSubsRaw) {
+            const origSubs = JSON.parse(origSubsRaw);
+            if (Array.isArray(origSubs)) {
+              origSubs.forEach(sub => processSub(sub));
+            }
+          }
+        } catch {}
+      }
+
       try {
         const allSubsRaw = localStorage.getItem('eduplay_all_exam_submissions');
         if (allSubsRaw) {
@@ -1914,6 +1949,12 @@ export const ExamManagementModule: React.FC<ExamManagementModuleProps> = ({
         }
       } catch {}
     }
+
+    const explicitCount = Math.max(
+      typeof exam.submissionsCount === 'number' ? exam.submissionsCount : 0,
+      typeof (exam as any).completedCount === 'number' ? (exam as any).completedCount : 0,
+      typeof (exam as any).submittedCount === 'number' ? (exam as any).submittedCount : 0
+    );
 
     const computedCount = subMap.size;
     return Math.max(computedCount, explicitCount);

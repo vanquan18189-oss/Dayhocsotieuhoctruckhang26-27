@@ -1,6 +1,8 @@
 import { db } from './firebase';
 import { doc, setDoc, onSnapshot, collection, getDoc, getDocs } from 'firebase/firestore';
-import { AssignmentSubmission } from '../types';
+import { AssignmentSubmission, ExamPaper, HomeworkAssignment } from '../types';
+import { trackedSetDoc } from './firestoreWriteTracker';
+import { getStudentsFromLocalStorage } from './studentStorageService';
 
 export const ASSIGNMENT_SUBMISSIONS_COLLECTION = 'assignment_submissions';
 export const EXAM_SUBMISSIONS_COLLECTION = 'exam_submissions';
@@ -132,7 +134,7 @@ export function subscribeExamSubmissions(
     return docClass === cleanClassId;
   };
 
-  const processDoc = (docSnap: any) => {
+  const processDoc = (docSnap: any, fromSubcollection: boolean = false) => {
     const data = docSnap.data();
     if (!data) return;
     
@@ -142,6 +144,7 @@ export function subscribeExamSubmissions(
     const itemRootId = itemExamId.replace(/-class-.*$/, '');
 
     const isMatch = Boolean(
+      fromSubcollection ||
       (itemExamId && (itemExamId === lowerExamId || itemExamId === cleanExamId || itemRootId === rootExamId)) ||
       (rawTestId !== undefined && String(rawTestId) === cleanExamId) ||
       (typeof examId === 'number' && Number(rawTestId) === examId) ||
@@ -174,7 +177,7 @@ export function subscribeExamSubmissions(
   try {
     const examSubCol = collection(db, 'exams', cleanExamId, 'submissions');
     unsubs.push(onSnapshot(examSubCol, (snap) => {
-      snap.forEach(processDoc);
+      snap.forEach(d => processDoc(d, true));
       emit();
     }, (err) => console.warn('Note: exams subcollection onSnapshot:', err)));
   } catch {}
@@ -183,7 +186,7 @@ export function subscribeExamSubmissions(
     try {
       const rootSubCol = collection(db, 'exams', rootExamId, 'submissions');
       unsubs.push(onSnapshot(rootSubCol, (snap) => {
-        snap.forEach(processDoc);
+        snap.forEach(d => processDoc(d, true));
         emit();
       }, (err) => console.warn('Note: root exam subcollection onSnapshot:', err)));
     } catch {}
@@ -192,17 +195,35 @@ export function subscribeExamSubmissions(
   try {
     const assignSubCol = collection(db, 'assignments', cleanExamId, 'submissions');
     unsubs.push(onSnapshot(assignSubCol, (snap) => {
-      snap.forEach(processDoc);
+      snap.forEach(d => processDoc(d, true));
       emit();
     }, (err) => console.warn('Note: assignments subcollection onSnapshot:', err)));
   } catch {}
 
+  if (rootExamId && rootExamId !== lowerExamId) {
+    try {
+      const rootAssignSubCol = collection(db, 'assignments', rootExamId, 'submissions');
+      unsubs.push(onSnapshot(rootAssignSubCol, (snap) => {
+        snap.forEach(d => processDoc(d, true));
+        emit();
+      }, (err) => console.warn('Note: root assignments subcollection onSnapshot:', err)));
+    } catch {}
+  }
+
   try {
     const globalCol = collection(db, EXAM_SUBMISSIONS_COLLECTION);
     unsubs.push(onSnapshot(globalCol, (snap) => {
-      snap.forEach(processDoc);
+      snap.forEach(d => processDoc(d, false));
       emit();
     }, (err) => console.warn('Note: global exam_submissions onSnapshot:', err)));
+  } catch {}
+
+  try {
+    const globalAssignCol = collection(db, ASSIGNMENT_SUBMISSIONS_COLLECTION);
+    unsubs.push(onSnapshot(globalAssignCol, (snap) => {
+      snap.forEach(d => processDoc(d, false));
+      emit();
+    }, (err) => console.warn('Note: global assignment_submissions onSnapshot:', err)));
   } catch {}
 
   return () => {
@@ -414,4 +435,286 @@ export function subscribeAllExamSubmissions(
     onUpdate(new Map());
     return () => {};
   }
+}
+
+/**
+ * Đồng bộ số lượng bài nộp cho một Đề kiểm tra trực tiếp từ Firestore subcollections
+ * Tự động cập nhật `submissionsCount`, `completedCount`, `submittedCount` trên tài liệu đề nếu có sự chênh lệch.
+ */
+export async function syncExamSubmissionsCount(exam: ExamPaper): Promise<number> {
+  if (!db || !exam?.id) return typeof exam?.submissionsCount === 'number' ? exam.submissionsCount : 0;
+
+  try {
+    const cleanId = String(exam.id).trim();
+    const lowerId = cleanId.toLowerCase();
+    const rootId = lowerId.replace(/-class-.*$/, '');
+    const origId = exam.originalExamId ? String(exam.originalExamId).trim().toLowerCase() : '';
+    const targetCls = exam.targetClass || '';
+    const normCls = targetCls.trim().toLowerCase().replace(/^lớp\s*/i, '');
+
+    const roster = getStudentsFromLocalStorage(targetCls) || [];
+    const rosterKeys = new Set<string>();
+    roster.forEach((st: any) => {
+      [st.sddcn, st.code, st.id, st.name, st.fullName].forEach(k => {
+        if (k) rosterKeys.add(String(k).trim().toLowerCase());
+      });
+    });
+
+    const uniqueStudents = new Set<string>();
+
+    const checkAndAdd = (data: any, docId: string, fromSubCol: boolean = false) => {
+      if (!data) return;
+      const rawTestId = data.testId ?? data.examId ?? data.assignmentId ?? data.targetId ?? data.targetExamId;
+      const itemExamId = String(rawTestId || '').trim().toLowerCase();
+      const itemRootId = itemExamId.replace(/-class-.*$/, '');
+
+      const isMatch = Boolean(
+        fromSubCol ||
+        (itemExamId && (itemExamId === lowerId || itemExamId === cleanId || itemRootId === rootId || (origId && itemExamId === origId))) ||
+        (rawTestId !== undefined && String(rawTestId) === cleanId) ||
+        docId.toLowerCase().startsWith(`${lowerId}_`) ||
+        docId.toLowerCase().startsWith(`${rootId}_`)
+      );
+      if (!isMatch && itemExamId) return;
+
+      const subCls = String(data.classId || data.studentClass || data.className || data.targetClass || data.lop || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
+      const studentKey = String(data.sddcn || data.studentPersistentId || data.studentId || data.maHs || data.studentCode || data.code || docId).trim().toLowerCase();
+      const studentName = String(data.studentName || data.name || data.fullName || '').trim().toLowerCase();
+
+      if (normCls) {
+        const isClassEqual = subCls && subCls === normCls;
+        const isInRoster = rosterKeys.has(studentKey) || (studentName && rosterKeys.has(studentName));
+        if (subCls && !isClassEqual && !isInRoster) {
+          return;
+        }
+      }
+
+      if (studentKey) {
+        uniqueStudents.add(studentKey);
+      }
+    };
+
+    // 1. Query exams/{cleanId}/submissions
+    try {
+      const snap = await getDocs(collection(db, 'exams', cleanId, 'submissions'));
+      snap.forEach(d => checkAndAdd(d.data(), d.id, true));
+    } catch {}
+
+    // 2. Query exams/{rootId}/submissions
+    if (rootId && rootId !== lowerId) {
+      try {
+        const snap = await getDocs(collection(db, 'exams', rootId, 'submissions'));
+        snap.forEach(d => checkAndAdd(d.data(), d.id, true));
+      } catch {}
+    }
+
+    // 3. Query assignments/{cleanId}/submissions
+    try {
+      const snap = await getDocs(collection(db, 'assignments', cleanId, 'submissions'));
+      snap.forEach(d => checkAndAdd(d.data(), d.id, true));
+    } catch {}
+
+    // 4. Check array exam.submissions
+    if (Array.isArray(exam.submissions)) {
+      exam.submissions.forEach((s: any) => checkAndAdd(s, s.id || '', false));
+    }
+
+    // 5. Check LocalStorage submissions
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(`eduplay_exam_subs_${exam.id}`);
+        if (raw) {
+          const list = JSON.parse(raw);
+          if (Array.isArray(list)) list.forEach((s: any) => checkAndAdd(s, s.id || '', false));
+        }
+      } catch {}
+    }
+
+    const explicit = Math.max(
+      typeof exam.submissionsCount === 'number' ? exam.submissionsCount : 0,
+      typeof (exam as any).completedCount === 'number' ? (exam as any).completedCount : 0,
+      typeof (exam as any).submittedCount === 'number' ? (exam as any).submittedCount : 0
+    );
+
+    const calculated = Math.max(uniqueStudents.size, explicit);
+
+    // If calculated differs from exam.submissionsCount, write back to Firestore doc
+    if (calculated > 0 && exam.submissionsCount !== calculated) {
+      try {
+        const examRef = doc(db, 'exams', exam.id);
+        await trackedSetDoc(examRef, {
+          submissionsCount: calculated,
+          completedCount: calculated,
+          submittedCount: calculated,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        exam.submissionsCount = calculated;
+        (exam as any).completedCount = calculated;
+        (exam as any).submittedCount = calculated;
+      } catch (err) {
+        console.warn(`Lỗi cập nhật submissionsCount cho exam ${exam.id}:`, err);
+      }
+    }
+
+    return calculated;
+  } catch (e) {
+    console.warn(`Lỗi syncExamSubmissionsCount cho đề ${exam.id}:`, e);
+    return typeof exam.submissionsCount === 'number' ? exam.submissionsCount : 0;
+  }
+}
+
+/**
+ * Đồng bộ toàn bộ danh sách Đề kiểm tra
+ */
+export async function syncAllExamsSubmissionsCounts(exams: ExamPaper[]): Promise<Map<string, number>> {
+  const resMap = new Map<string, number>();
+  if (!Array.isArray(exams) || exams.length === 0) return resMap;
+
+  await Promise.allSettled(
+    exams.map(async (exam) => {
+      const count = await syncExamSubmissionsCount(exam);
+      resMap.set(exam.id, count);
+    })
+  );
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('eduplay_exam_submissions_updated'));
+  }
+
+  return resMap;
+}
+
+/**
+ * Đồng bộ số lượng bài nộp cho một Bài tập trực tiếp từ Firestore subcollections
+ * Tự động cập nhật `completedCount`, `submittedCount`, `submissionsCount` trên tài liệu bài tập nếu có sự chênh lệch.
+ */
+export async function syncAssignmentSubmissionsCount(as: HomeworkAssignment): Promise<number> {
+  if (!db || !as?.id) return typeof as?.completedCount === 'number' ? as.completedCount : 0;
+
+  try {
+    const cleanId = String(as.id).trim();
+    const lowerId = cleanId.toLowerCase();
+    const rootId = lowerId.replace(/-class-.*$/, '');
+    const origId = (as as any).originalAssignmentId ? String((as as any).originalAssignmentId).trim().toLowerCase() : '';
+    const targetCls = as.targetClass || '';
+    const normCls = targetCls.trim().toLowerCase().replace(/^lớp\s*/i, '');
+
+    const roster = getStudentsFromLocalStorage(targetCls) || [];
+    const rosterKeys = new Set<string>();
+    roster.forEach((st: any) => {
+      [st.sddcn, st.code, st.id, st.name, st.fullName].forEach(k => {
+        if (k) rosterKeys.add(String(k).trim().toLowerCase());
+      });
+    });
+
+    const uniqueStudents = new Set<string>();
+
+    const checkAndAdd = (data: any, docId: string, fromSubCol: boolean = false) => {
+      if (!data) return;
+      const rawTestId = data.testId ?? data.examId ?? data.assignmentId ?? data.targetId ?? data.targetExamId;
+      const itemExamId = String(rawTestId || '').trim().toLowerCase();
+      const itemRootId = itemExamId.replace(/-class-.*$/, '');
+
+      const isMatch = Boolean(
+        fromSubCol ||
+        (itemExamId && (itemExamId === lowerId || itemExamId === cleanId || itemRootId === rootId || (origId && itemExamId === origId))) ||
+        (rawTestId !== undefined && String(rawTestId) === cleanId) ||
+        docId.toLowerCase().startsWith(`${lowerId}_`) ||
+        docId.toLowerCase().startsWith(`${rootId}_`)
+      );
+      if (!isMatch && itemExamId) return;
+
+      const subCls = String(data.classId || data.studentClass || data.className || data.targetClass || data.lop || '').trim().toLowerCase().replace(/^lớp\s*/i, '');
+      const studentKey = String(data.sddcn || data.studentPersistentId || data.studentId || data.maHs || data.studentCode || data.code || docId).trim().toLowerCase();
+      const studentName = String(data.studentName || data.name || data.fullName || '').trim().toLowerCase();
+
+      if (normCls) {
+        const isClassEqual = subCls && subCls === normCls;
+        const isInRoster = rosterKeys.has(studentKey) || (studentName && rosterKeys.has(studentName));
+        if (subCls && !isClassEqual && !isInRoster) {
+          return;
+        }
+      }
+
+      if (studentKey) {
+        uniqueStudents.add(studentKey);
+      }
+    };
+
+    // 1. Query assignments/{cleanId}/submissions
+    try {
+      const snap = await getDocs(collection(db, 'assignments', cleanId, 'submissions'));
+      snap.forEach(d => checkAndAdd(d.data(), d.id, true));
+    } catch {}
+
+    // 2. Query assignments/{rootId}/submissions
+    if (rootId && rootId !== lowerId) {
+      try {
+        const snap = await getDocs(collection(db, 'assignments', rootId, 'submissions'));
+        snap.forEach(d => checkAndAdd(d.data(), d.id, true));
+      } catch {}
+    }
+
+    // 3. Query exams/{cleanId}/submissions
+    try {
+      const snap = await getDocs(collection(db, 'exams', cleanId, 'submissions'));
+      snap.forEach(d => checkAndAdd(d.data(), d.id, true));
+    } catch {}
+
+    // 4. Check array as.submissions
+    if (Array.isArray(as.submissions)) {
+      as.submissions.forEach((s: any) => checkAndAdd(s, s.id || '', false));
+    }
+
+    const explicit = Math.max(
+      typeof as.completedCount === 'number' ? as.completedCount : 0,
+      typeof as.submittedCount === 'number' ? as.submittedCount : 0,
+      typeof (as as any).submissionsCount === 'number' ? (as as any).submissionsCount : 0
+    );
+
+    const calculated = Math.max(uniqueStudents.size, explicit);
+
+    if (calculated > 0 && as.completedCount !== calculated) {
+      try {
+        const asRef = doc(db, 'assignments', as.id);
+        await trackedSetDoc(asRef, {
+          completedCount: calculated,
+          submittedCount: calculated,
+          submissionsCount: calculated,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        as.completedCount = calculated;
+        as.submittedCount = calculated;
+        (as as any).submissionsCount = calculated;
+      } catch (err) {
+        console.warn(`Lỗi cập nhật completedCount cho assignment ${as.id}:`, err);
+      }
+    }
+
+    return calculated;
+  } catch (e) {
+    console.warn(`Lỗi syncAssignmentSubmissionsCount cho bài tập ${as.id}:`, e);
+    return typeof as.completedCount === 'number' ? as.completedCount : 0;
+  }
+}
+
+/**
+ * Đồng bộ toàn bộ danh sách Bài tập
+ */
+export async function syncAllAssignmentsSubmissionsCounts(assignments: HomeworkAssignment[]): Promise<Map<string, number>> {
+  const resMap = new Map<string, number>();
+  if (!Array.isArray(assignments) || assignments.length === 0) return resMap;
+
+  await Promise.allSettled(
+    assignments.map(async (as) => {
+      const count = await syncAssignmentSubmissionsCount(as);
+      resMap.set(as.id, count);
+    })
+  );
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('eduplay_student_submissions_updated'));
+  }
+
+  return resMap;
 }
