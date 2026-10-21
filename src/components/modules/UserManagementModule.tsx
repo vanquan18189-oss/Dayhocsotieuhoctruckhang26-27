@@ -48,7 +48,7 @@ import {
 } from 'lucide-react';
 import { UserAccount, UserRole, StudentRecord } from '../../types';
 import { PRIMARY_SCHOOL_SUBJECTS } from '../../services/mockData';
-import { STANDARD_GRADE_SUBJECTS, extractGradeDigit, formatGradeStandard, fetchClassesForGrade } from '../../services/classStorageService';
+import { STANDARD_GRADE_SUBJECTS, extractGradeDigit, formatGradeStandard, fetchClassesForGrade, subscribeRealtimeClasses, fetchAllClassesFromFirestore } from '../../services/classStorageService';
 import { formatScore } from '../../utils/scoreUtils';
 import { groupAndCountErrors } from '../../services/firestoreWriteTracker';
 import { runSaveOperation, verifyServerDocWritten } from '../../utils/saveUtils';
@@ -664,7 +664,16 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
 
   // 1. Initial Mount Sync: Setup real-time Firestore listeners & proactive fetch
   useEffect(() => {
-    // Proactively fetch all class rosters in parallel from Firestore to enforce Firestore as single source of truth
+    // Proactively fetch all classes and student rosters in parallel from Firestore
+    fetchAllClassesFromFirestore()
+      .then((remoteClasses) => {
+        if (remoteClasses && remoteClasses.length > 0) {
+          setClassesList(remoteClasses);
+          saveClassesToLocalStorage(remoteClasses);
+        }
+      })
+      .catch(console.warn);
+
     fetchAllStudentsFromFirestore()
       .then((remoteDb) => {
         const cleaned = remoteDb || {};
@@ -688,49 +697,13 @@ export const UserManagementModule: React.FC<UserManagementModuleProps> = ({
       setStudentDatabase({});
       setIsStudentsLoading(false);
     } else {
-      // 1. Real-time listener for 'classes' collection
-      unsubClasses = onSnapshot(
-        collection(db, 'classes'),
-        (snapshot) => {
-          const cloudClasses: ClassConfig[] = [];
-          const seenKeys = new Set<string>();
-          if (!snapshot.empty) {
-            snapshot.forEach((docSnap) => {
-              const data = docSnap.data();
-              const rawId = (docSnap.id || data.id || data.classId || '').trim();
-              const rawName = data.name || data.className || rawId || 'Lớp mới';
-              const stdName = getStandardClassName(rawName);
-              const upperKey = stdName.replace(/^Lớp\s*/i, '').trim().toUpperCase() || rawId.toUpperCase();
-              
-              if (!seenKeys.has(upperKey)) {
-                seenKeys.add(upperKey);
-                const rawGrade = (data.grade || '').trim();
-                const digit = extractGradeDigit(rawGrade) || extractGradeDigit(stdName) || extractGradeDigit(rawId);
-                const grade = digit ? `Khối ${digit}` : (rawGrade ? formatGradeStandard(rawGrade) : 'Khối 1');
-
-                cloudClasses.push({
-                  id: upperKey,
-                  grade,
-                  name: stdName,
-                  room: data.room || '',
-                  homeroomTeacher: data.homeroomTeacher || '',
-                  homeroomTeacherId: data.homeroomTeacherId || '',
-                  subjects: Array.isArray(data.subjects) && data.subjects.length > 0
-                    ? data.subjects
-                    : (STANDARD_GRADE_SUBJECTS[grade] || PRIMARY_SCHOOL_SUBJECTS).map((s) => ({ isVisible: true, subjectName: s }))
-                });
-              }
-            });
-          }
-          // Strictly synchronize: if Firestore has 0 classes, cloudClasses is []
-          setClassesList(cloudClasses);
-          saveClassesToLocalStorage(cloudClasses);
-        },
-        (err) => {
-          console.warn('Error listening to classes in Firestore:', err);
-          setClassesList([]);
+      // 1. Real-time listener for classes (combines 'classes' and 'class_rosters' collections)
+      unsubClasses = subscribeRealtimeClasses((clsList) => {
+        if (clsList && clsList.length > 0) {
+          setClassesList(clsList);
+          saveClassesToLocalStorage(clsList);
         }
-      );
+      });
 
       // 2. Real-time listener for 'class_rosters' collection (robust dual-key normalization & class list fallback)
       unsubRosters = onSnapshot(
